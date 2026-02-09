@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T20:42:47+00:00
+Last updated: 2026-02-09T20:57:09+00:00
 
 ## Fixed Principles
 
@@ -46,3 +46,10 @@ Last updated: 2026-02-09T20:42:47+00:00
 - 2026-02-09T20:42:19+00:00 | Re-generated local heatmaps: `7d` for `202407-202410`, and refreshed QA previews/reports under `outputs/qa`.
 - 2026-02-09T20:42:19+00:00 | Validation: `python -m compileall app scripts` (pass), `python -m pytest -q` -> `10 passed`.
 - 2026-02-09T20:42:47+00:00 | Committed and pushed `53617d4`: heatmap QA scripts + unsorted AIS generation fix.
+- 2026-02-09T20:56:27+00:00 | Root-cause check: source env vars (ice_conc/ice_thick/wave_hs) in NSRcorridorNA only cover to 2024-10-31_00; 2024-10-31_06/12/18 absent at source intersection.
+- 2026-02-09T20:56:27+00:00 | Built patch env tag NSRcorridorNA/data/interim/env_grids/202410_patch_fill and filled 2024-10-31_06/12/18 by persistence copy from 2024-10-31_00 (documented in env_build_report patch_note).
+- 2026-02-09T20:56:27+00:00 | Ran src/data/align_windows.py with NSR_OUT_TAG=202410_patch_fill, NSR_WINDOW_HOURS=6; generated aligned windows including 2024-10-31_06/12/18.
+- 2026-02-09T20:56:27+00:00 | Ran src/data/rasterize_corridor.py with NSR_DILATE=1, NSR_SIGMA=1.0, NSR_SKELETON=0, NSR_DISTANCE=1, NSR_PROX=1; generated y_corridor/y_distance/y_prox for patch tag.
+- 2026-02-09T20:56:27+00:00 | Copied patched sample dirs 2024-10-31_06, 2024-10-31_12, 2024-10-31_18 into NSR2/data/processed/samples/202410.
+- 2026-02-09T20:56:27+00:00 | Verification: samples_202410 missing count -> 0/124; generated QA visualization outputs/qa/heatmap_oct31_18_compare.png and reran backend/scripts/audit_data_resources.py.
+- 2026-02-09T20:57:05+00:00 | Pre-submit validation: python -m pytest -q in backend -> 10 passed.
