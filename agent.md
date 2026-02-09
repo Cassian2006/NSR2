@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T21:19:39+00:00
+Last updated: 2026-02-09T21:44:33+00:00
 
 ## Fixed Principles
 
@@ -66,3 +66,6 @@ Last updated: 2026-02-09T21:19:39+00:00
 - 2026-02-09T21:19:26+00:00 | Committed 4b860b7: feat: prepare unet annotation pack and label manifest.
 - 2026-02-09T21:19:26+00:00 | Pushed 4b860b7 to origin/main.
 - 2026-02-09T21:19:39+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 14 passed.
+- 2026-02-09T21:44:33+00:00 | Confirmed Labelme available: labelme --version -> 5.11.2; launched Labelme on annotation sample quicklook with label preset caution.
+- 2026-02-09T21:44:33+00:00 | Added labelme conversion helper: backend/app/preprocess/labelme_io.py and backend/scripts/import_labelme_caution.py.
+- 2026-02-09T21:44:33+00:00 | Added tests for labelme conversion: backend/tests/test_labelme_io.py; validation: python -m pytest -q -> 16 passed.
