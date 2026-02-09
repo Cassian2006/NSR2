@@ -61,3 +61,27 @@ def test_generate_heatmaps_from_csv(tmp_path: Path) -> None:
     assert float(arr0.max()) <= 1.0
     assert float(arr1.max()) <= 1.0
     assert float(arr1.sum()) > 0.0
+
+
+def test_generate_heatmaps_from_unsorted_csv(tmp_path: Path) -> None:
+    csv_path = tmp_path / "ais_unsorted.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "mmsi,postime,lon,lat,status,eta,dest,draught,cog,hdg,sog,rot",
+                "1,2024-07-01 12:00:00,12.0,70.4,0,,,,,,",
+                "1,2024-07-01 00:00:00,10.0,70.0,0,,,,,,",
+                "1,2024-07-01 06:00:00,11.0,70.2,0,,,,,,",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "hm_unsorted"
+    grid = GridSpec(height=8, width=8, lat_min=60.0, lat_max=80.0, lon_min=0.0, lon_max=20.0)
+    timestamps = [datetime(2024, 7, 1, 6, 0, 0), datetime(2024, 7, 1, 12, 0, 0)]
+    saved = generate_heatmaps_from_csv(csv_path, out_dir, grid, timestamps, window_hours=12)
+    assert len(saved) == 2
+    arr0 = np.load(saved[0])
+    arr1 = np.load(saved[1])
+    assert float(arr0.sum()) > 0.0
+    assert float(arr1.sum()) >= float(arr0.sum())

@@ -89,6 +89,24 @@ def generate_heatmaps_from_csv(
     if not centers:
         return []
 
+    events: list[tuple[datetime, int, int]] = []
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            postime = parse_timestamp(row["postime"])
+            try:
+                lon = float(row["lon"])
+                lat = float(row["lat"])
+            except (TypeError, ValueError):
+                continue
+            cell = to_cell(lat, lon, grid)
+            if cell is None:
+                continue
+            r, c = cell
+            events.append((postime, r, c))
+
+    events.sort(key=lambda x: x[0])
+
     hist = np.zeros((grid.height, grid.width), dtype=np.int32)
     q: deque[tuple[datetime, int, int]] = deque()
     center_idx = 0
@@ -106,22 +124,10 @@ def generate_heatmaps_from_csv(
             saved.append(_save_heatmap(out_dir, center, hist))
             center_idx += 1
 
-    with csv_path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            postime = parse_timestamp(row["postime"])
-            flush_until(postime)
-            try:
-                lon = float(row["lon"])
-                lat = float(row["lat"])
-            except (TypeError, ValueError):
-                continue
-            cell = to_cell(lat, lon, grid)
-            if cell is None:
-                continue
-            r, c = cell
-            q.append((postime, r, c))
-            hist[r, c] += 1
+    for postime, r, c in events:
+        flush_until(postime)
+        q.append((postime, r, c))
+        hist[r, c] += 1
 
     flush_until(datetime.max)
     return saved

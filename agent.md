@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T20:23:11+00:00
+Last updated: 2026-02-09T20:42:19+00:00
 
 ## Fixed Principles
 
@@ -41,3 +41,7 @@ Last updated: 2026-02-09T20:23:11+00:00
 - 2026-02-09T20:22:53+00:00 | Committed `4c4d9af`: ignore local data + add local AIS heatmap generator and tests.
 - 2026-02-09T20:22:53+00:00 | Pushed `4c4d9af` to `origin/main`.
 - 2026-02-09T20:23:11+00:00 | Pre-submit test before log sync commit: `python -m pytest -q` in `backend` -> `9 passed`.
+- 2026-02-09T20:42:19+00:00 | Added QA scripts: `backend/scripts/visualize_heatmap.py` and `backend/scripts/audit_data_resources.py`.
+- 2026-02-09T20:42:19+00:00 | Fixed AIS heatmap generation robustness: sort events by `postime` before rolling-window accumulation.
+- 2026-02-09T20:42:19+00:00 | Re-generated local heatmaps: `7d` for `202407-202410`, and refreshed QA previews/reports under `outputs/qa`.
+- 2026-02-09T20:42:19+00:00 | Validation: `python -m compileall app scripts` (pass), `python -m pytest -q` -> `10 passed`.
