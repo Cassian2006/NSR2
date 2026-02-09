@@ -113,3 +113,6 @@
 - 2026-02-09T23:21:01+00:00 | Rebuilt labeled manifest: data/processed/unet_manifest_labeled.csv -> rows=52 (train=39, val=13 with val_month=202408).
 - 2026-02-09T23:21:01+00:00 | Retrained quick U-Net on 52 labels: outputs/train_runs/unet_quick_20260209_231959/summary.json (best val_loss=0.2922, val_miou=0.6743, val_iou_caution=0.3012, val_iou_blocked=0.9394; best caution epoch=4 -> 0.3290).
 - 2026-02-09T23:21:01+00:00 | Validation: python -m pytest -q -> 17 passed.
+- 2026-02-09T23:21:23+00:00 | Pre-submit validation before push: python -m pytest -q in backend -> 17 passed.
+- 2026-02-09T23:21:23+00:00 | Committed bef9055: feat: finalize active review labels and retrain on 52 samples.
+- 2026-02-09T23:21:23+00:00 | Pushed bef9055 to origin/main.
