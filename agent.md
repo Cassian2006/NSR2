@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T21:54:42+00:00
+Last updated: 2026-02-09T21:57:47+00:00
 
 ## Fixed Principles
 
@@ -77,3 +77,6 @@ Last updated: 2026-02-09T21:54:42+00:00
 - 2026-02-09T21:54:42+00:00 | Verified LabelImg and Labelme binaries; launched LabelImg for annotation_pack directory test (bbox workflow).
 - 2026-02-09T21:54:42+00:00 | Generated blocked-mask overlay previews for shortlist-50: quicklook_blocked_overlay.png in each timestamp folder.
 - 2026-02-09T21:54:42+00:00 | Launched Labelme on overlay image (2024-10-31_18) with label preset caution for polygon-based caution annotation.
+- 2026-02-09T21:57:47+00:00 | Created dedicated Labelme set: data/processed/annotation_pack/labelme_blocked_50 with 50 renamed blocked-overlay images (blocked_001.png ... blocked_050.png).
+- 2026-02-09T21:57:47+00:00 | Generated mapping file for renamed images: data/processed/annotation_pack/labelme_blocked_50/mapping.csv (filename -> timestamp).
+- 2026-02-09T21:57:47+00:00 | Launched Labelme on labelme_blocked_50 folder with preset label caution.
