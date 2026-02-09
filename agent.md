@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T21:18:51+00:00
+Last updated: 2026-02-09T21:19:39+00:00
 
 ## Fixed Principles
 
@@ -62,3 +62,7 @@ Last updated: 2026-02-09T21:18:51+00:00
 - 2026-02-09T21:18:51+00:00 | Built full annotation pack (202407-202410): data/processed/annotation_pack (492 samples).
 - 2026-02-09T21:18:51+00:00 | Built training manifest: data/processed/unet_manifest.csv (train=368, val=124 with val_month=202410).
 - 2026-02-09T21:18:51+00:00 | Added tests: backend/tests/test_unet_dataset_prep.py; validation: python -m pytest -q -> 14 passed.
+- 2026-02-09T21:19:26+00:00 | Pre-submit validation before push: python -m pytest -q in backend -> 14 passed.
+- 2026-02-09T21:19:26+00:00 | Committed 4b860b7: feat: prepare unet annotation pack and label manifest.
+- 2026-02-09T21:19:26+00:00 | Pushed 4b860b7 to origin/main.
+- 2026-02-09T21:19:39+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 14 passed.
