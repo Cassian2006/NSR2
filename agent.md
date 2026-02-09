@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T22:58:20+00:00
+Last updated: 2026-02-09T22:59:04+00:00
 
 ## Fixed Principles
 
@@ -104,3 +104,7 @@ Last updated: 2026-02-09T22:58:20+00:00
 - 2026-02-09T22:58:20+00:00 | Updated import script backend/scripts/import_labelme_from_mapping.py to support configurable filename template for different label rounds.
 - 2026-02-09T22:58:20+00:00 | Training comparison runs completed: unet_quick_20260209_225653 and unet_quick_20260209_225723 (augmentation configs tested).
 - 2026-02-09T22:58:20+00:00 | Validation: python -m pytest -q -> 17 passed.
+- 2026-02-09T22:58:47+00:00 | Pre-submit validation before push: python -m pytest -q in backend -> 17 passed.
+- 2026-02-09T22:58:47+00:00 | Committed 2692c35: feat: add active learning suggestion flow and stronger quick training aug.
+- 2026-02-09T22:58:47+00:00 | Pushed 2692c35 to origin/main.
+- 2026-02-09T22:59:04+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 17 passed.
