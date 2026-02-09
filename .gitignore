@@ -1,0 +1,18 @@
+# frontend
+frontend/node_modules/
+frontend/build/
+
+# backend
+backend/.venv/
+backend/__pycache__/
+backend/**/*.pyc
+
+# runtime outputs
+outputs/
+backend/.env
+
+# data artifacts
+data/env/
+data/bathy/
+data/ais_heatmap/
+data/unet_pred/
