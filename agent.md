@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T21:45:22+00:00
+Last updated: 2026-02-09T21:54:42+00:00
 
 ## Fixed Principles
 
@@ -73,3 +73,7 @@ Last updated: 2026-02-09T21:45:22+00:00
 - 2026-02-09T21:45:12+00:00 | Committed c06b6a5: feat: add labelme-to-caution import pipeline.
 - 2026-02-09T21:45:12+00:00 | Pushed c06b6a5 to origin/main.
 - 2026-02-09T21:45:22+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 16 passed.
+- 2026-02-09T21:46:46+00:00 | Clarified labeling policy (blocked from bathy/land, caution manual, else safe) and generated balanced shortlist: data/processed/annotation_pack/SHORTLIST_50.txt (50 timestamps).
+- 2026-02-09T21:54:42+00:00 | Verified LabelImg and Labelme binaries; launched LabelImg for annotation_pack directory test (bbox workflow).
+- 2026-02-09T21:54:42+00:00 | Generated blocked-mask overlay previews for shortlist-50: quicklook_blocked_overlay.png in each timestamp folder.
+- 2026-02-09T21:54:42+00:00 | Launched Labelme on overlay image (2024-10-31_18) with label preset caution for polygon-based caution annotation.
