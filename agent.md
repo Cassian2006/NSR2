@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T21:57:47+00:00
+Last updated: 2026-02-09T22:46:13+00:00
 
 ## Fixed Principles
 
@@ -80,3 +80,14 @@ Last updated: 2026-02-09T21:57:47+00:00
 - 2026-02-09T21:57:47+00:00 | Created dedicated Labelme set: data/processed/annotation_pack/labelme_blocked_50 with 50 renamed blocked-overlay images (blocked_001.png ... blocked_050.png).
 - 2026-02-09T21:57:47+00:00 | Generated mapping file for renamed images: data/processed/annotation_pack/labelme_blocked_50/mapping.csv (filename -> timestamp).
 - 2026-02-09T21:57:47+00:00 | Launched Labelme on labelme_blocked_50 folder with preset label caution.
+- 2026-02-09T22:01:15+00:00 | Generated and opened land/ocean black-white map: outputs/qa/land_ocean_bw.png (black=land, white=ocean) from data/interim/env_grids/2024-10-31_18/x_bathy.npy.
+- 2026-02-09T22:04:13+00:00 | Generated enhanced land-masked label set: data/processed/annotation_pack/labelme_blocked_50_enhanced (50 images + riskhint refs), and launched Labelme on this folder.
+- 2026-02-09T22:22:24+00:00 | Ran annotation QC on labelme_blocked_50_enhanced JSONs: outputs/qa/annotation_overlap_report.csv (12 labeled files, overlap mean=0.0139, max=0.0749, no high-overlap cases).
+- 2026-02-09T22:32:18+00:00 | Restarted Labelme and reopened annotation folder data/processed/annotation_pack/labelme_blocked_50_enhanced with label preset caution.
+- 2026-02-09T22:46:13+00:00 | Added script backend/scripts/import_labelme_from_mapping.py to map renamed Labelme JSONs (blocked_XXX_riskhint.json) back to timestamp caution masks via mapping.csv.
+- 2026-02-09T22:46:13+00:00 | Imported current annotations from labelme_blocked_50_enhanced: converted=32 JSONs into data/processed/annotation_pack/<timestamp>/caution_mask.(png|npy).
+- 2026-02-09T22:46:13+00:00 | Built labeled-only manifest: data/processed/unet_manifest_labeled.csv with --skip-empty-caution (rows=19; train=13 val=6, val_month=202409).
+- 2026-02-09T22:46:13+00:00 | Added quick baseline trainer backend/scripts/train_unet_quick.py (patch-based TinyUNet, weighted CE, train/val summary + checkpoints).
+- 2026-02-09T22:46:13+00:00 | Fixed NaN instability in trainer by sanitizing non-finite inputs before stats/normalization.
+- 2026-02-09T22:46:13+00:00 | Baseline run complete: outputs/train_runs/unet_quick_20260209_224525/summary.json (best epoch=7, val_loss=0.5703, val_miou=0.5713, val_iou_caution=0.0923, val_iou_blocked=0.8563).
+- 2026-02-09T22:46:13+00:00 | Validation: python -m pytest -q -> 16 passed.
