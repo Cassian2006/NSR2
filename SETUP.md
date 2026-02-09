@@ -13,8 +13,18 @@ Optional external heatmap (before copying into `NSR2/data`):
 ```powershell
 cd backend
 copy .env.example .env
-# edit NSR_HEATMAP_ROOT in .env
 ```
+
+## 1.1) Regenerate AIS heatmaps locally
+
+```powershell
+cd backend
+python scripts/generate_ais_heatmap.py --month 202407 --window-hours 168 --step-hours 6 --tag 7d
+```
+
+Outputs are written to:
+
+`data/ais_heatmap/<tag>/YYYY-MM-DD_HH.npy`
 
 ## 2) Frontend
 
@@ -40,6 +50,6 @@ setx VITE_API_BASE_URL "http://127.0.0.1:8000/v1"
 - Readme-standard folders are not yet materialized:
   - `data/env`
   - `data/bathy`
-  - `data/ais_heatmap`
+  - `data/ais_heatmap` (can be generated with the script above)
   - `data/unet_pred`
 - Backend now scans `data/processed/samples/**/meta.json` timestamps directly and can run before full migration.

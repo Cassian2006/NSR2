@@ -1,18 +1,20 @@
 # frontend
 frontend/node_modules/
 frontend/build/
+frontend/.vite/
 
 # backend
 backend/.venv/
 backend/__pycache__/
 backend/**/*.pyc
+backend/.pytest_cache/
+backend/.mypy_cache/
 
 # runtime outputs
 outputs/
 backend/.env
 
-# data artifacts
-data/env/
-data/bathy/
-data/ais_heatmap/
-data/unet_pred/
+# local datasets (not committed)
+data/**
+!data/README.md
+!data/.gitkeep

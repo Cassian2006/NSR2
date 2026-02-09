@@ -1,11 +1,11 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T20:11:51+00:00
+Last updated: 2026-02-09T20:22:20+00:00
 
 ## Fixed Principles
 
 1. Before every GitHub push/submit, run a review and `pytest` at least once.
-2. GitHub repository: `https://github.com/Cassian2006/NSR2.git` (currently no submissions yet).
+2. GitHub repository: `https://github.com/Cassian2006/NSR2.git`.
 3. Keep this `agent.md` updated with every operation, each with a timestamp.
 4. After successfully implementing a meaningful part, do review + Git commit.
 5. Prefer more tests and robustness checks.
@@ -32,3 +32,9 @@ Last updated: 2026-02-09T20:11:51+00:00
 - 2026-02-09T20:11:35+00:00 | Created commit `03e9505` with backend/frontend skeleton and tests.
 - 2026-02-09T20:11:35+00:00 | Pushed `main` to `origin` (`https://github.com/Cassian2006/NSR2.git`).
 - 2026-02-09T20:11:51+00:00 | Pre-submit test before log commit: `python -m pytest -q` in `backend` -> `5 passed`.
+- 2026-02-09T20:21:40+00:00 | Updated `.gitignore` to ignore all local dataset files under `data/**` while keeping `data/README.md` and `data/.gitkeep`.
+- 2026-02-09T20:21:40+00:00 | Removed external legacy heatmap dependency in backend; `ais_heatmap` layer now resolves from local `data/ais_heatmap`.
+- 2026-02-09T20:21:40+00:00 | Added local AIS heatmap generator: `backend/scripts/generate_ais_heatmap.py` + preprocessing module + tests.
+- 2026-02-09T20:21:40+00:00 | Validation: `python -m compileall app scripts` (pass), `python -m pytest -q` (9 passed).
+- 2026-02-09T20:21:40+00:00 | Runtime check: generated month heatmaps with `--month 202407 --step-hours 24 --tag smoke24h` -> 31 files.
+- 2026-02-09T20:22:20+00:00 | Final pre-commit validation rerun: `python -m compileall app scripts` (pass), `python -m pytest -q` (9 passed).

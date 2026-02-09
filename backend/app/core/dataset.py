@@ -106,15 +106,11 @@ class DatasetService:
             return False
         return p.exists()
 
-    def _find_external_heatmap(self, timestamp: str) -> Path | None:
-        root = self.settings.heatmap_root_path
-        if not root or not root.exists():
+    def _find_local_heatmap(self, timestamp: str) -> Path | None:
+        root = self.settings.ais_heatmap_root
+        if not root.exists():
             return None
-        direct = root / f"{timestamp}.npy"
-        if direct.exists():
-            return direct
-        needle = timestamp.replace("_", "-")
-        for p in root.rglob(f"*{needle}*.npy"):
+        for p in root.rglob(f"{timestamp}.npy"):
             return p
         return None
 
@@ -122,7 +118,7 @@ class DatasetService:
         normalized = normalize_timestamp(timestamp)
         sample = self._scan_samples().get(normalized)
         legacy = self._legacy_entry_by_timestamp(normalized)
-        external_heatmap = self._find_external_heatmap(normalized)
+        local_heatmap = self._find_local_heatmap(normalized)
         pred_file = self.settings.pred_root / "unet_v1" / f"{normalized}.npy"
         legacy_bathy_exists = False
         if legacy and legacy.get("x_bathy"):
@@ -138,9 +134,9 @@ class DatasetService:
             {
                 "id": "ais_heatmap",
                 "name": "AIS Heatmap",
-                "available": bool(sample and "y_corridor.npy" in sample.files) or external_heatmap is not None,
+                "available": local_heatmap is not None,
                 "unit": "score",
-                "source": "y_corridor.npy" if sample and "y_corridor.npy" in sample.files else str(external_heatmap) if external_heatmap else "",
+                "source": str(local_heatmap) if local_heatmap else "",
             },
             {
                 "id": "unet_pred",

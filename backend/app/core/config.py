@@ -14,21 +14,14 @@ class Settings(BaseSettings):
     outputs_root: Path = project_root / "outputs"
     processed_samples_root: Path = data_root / "processed" / "samples"
     dataset_index_path: Path = data_root / "processed" / "dataset" / "index.json"
+    ais_heatmap_root: Path = data_root / "ais_heatmap"
     gallery_root: Path = outputs_root / "gallery"
     pred_root: Path = outputs_root / "pred"
-
-    heatmap_root: str = ""
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [v.strip() for v in self.cors_origins.split(",") if v.strip()]
-
-    @property
-    def heatmap_root_path(self) -> Path | None:
-        if not self.heatmap_root.strip():
-            return None
-        return Path(self.heatmap_root)
 
 
 @lru_cache(maxsize=1)
@@ -39,5 +32,5 @@ def get_settings() -> Settings:
     (settings.gallery_root / "runs").mkdir(parents=True, exist_ok=True)
     (settings.gallery_root / "thumbs").mkdir(parents=True, exist_ok=True)
     settings.pred_root.mkdir(parents=True, exist_ok=True)
+    settings.ais_heatmap_root.mkdir(parents=True, exist_ok=True)
     return settings
-

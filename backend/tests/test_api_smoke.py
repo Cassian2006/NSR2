@@ -41,7 +41,8 @@ def test_layers(client: TestClient) -> None:
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["layers"]
-    assert any(item["id"] == "ais_heatmap" for item in payload["layers"])
+    heat_item = next(item for item in payload["layers"] if item["id"] == "ais_heatmap")
+    assert isinstance(heat_item["available"], bool)
 
 
 def test_route_plan_and_gallery(client: TestClient) -> None:
