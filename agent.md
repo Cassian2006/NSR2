@@ -1,6 +1,5 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T22:59:04+00:00
 
 ## Fixed Principles
 
@@ -108,3 +107,9 @@ Last updated: 2026-02-09T22:59:04+00:00
 - 2026-02-09T22:58:47+00:00 | Committed 2692c35: feat: add active learning suggestion flow and stronger quick training aug.
 - 2026-02-09T22:58:47+00:00 | Pushed 2692c35 to origin/main.
 - 2026-02-09T22:59:04+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 17 passed.
+- 2026-02-09T23:10:07+00:00 | Generated review overlays for active top-20 at outputs/active_learning/active_20260209_225559/labelme_active_topk/review_overlay20 (blocked=black, AI suggest=cyan+white edge), with mapping_review.csv.
+- 2026-02-09T23:21:01+00:00 | Added backend/scripts/finalize_active_review.py to finalize active-review labels by merging human review JSON with AI suggested caution masks.
+- 2026-02-09T23:21:01+00:00 | Finalized active top-20 review into annotation_pack: merged=19, suggest_only=1.
+- 2026-02-09T23:21:01+00:00 | Rebuilt labeled manifest: data/processed/unet_manifest_labeled.csv -> rows=52 (train=39, val=13 with val_month=202408).
+- 2026-02-09T23:21:01+00:00 | Retrained quick U-Net on 52 labels: outputs/train_runs/unet_quick_20260209_231959/summary.json (best val_loss=0.2922, val_miou=0.6743, val_iou_caution=0.3012, val_iou_blocked=0.9394; best caution epoch=4 -> 0.3290).
+- 2026-02-09T23:21:01+00:00 | Validation: python -m pytest -q -> 17 passed.
