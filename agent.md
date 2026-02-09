@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T20:42:19+00:00
+Last updated: 2026-02-09T20:42:47+00:00
 
 ## Fixed Principles
 
@@ -45,3 +45,4 @@ Last updated: 2026-02-09T20:42:19+00:00
 - 2026-02-09T20:42:19+00:00 | Fixed AIS heatmap generation robustness: sort events by `postime` before rolling-window accumulation.
 - 2026-02-09T20:42:19+00:00 | Re-generated local heatmaps: `7d` for `202407-202410`, and refreshed QA previews/reports under `outputs/qa`.
 - 2026-02-09T20:42:19+00:00 | Validation: `python -m compileall app scripts` (pass), `python -m pytest -q` -> `10 passed`.
+- 2026-02-09T20:42:47+00:00 | Committed and pushed `53617d4`: heatmap QA scripts + unsorted AIS generation fix.
