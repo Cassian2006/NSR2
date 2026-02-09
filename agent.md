@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T20:57:09+00:00
+Last updated: 2026-02-09T20:57:48+00:00
 
 ## Fixed Principles
 
@@ -53,3 +53,6 @@ Last updated: 2026-02-09T20:57:09+00:00
 - 2026-02-09T20:56:27+00:00 | Copied patched sample dirs 2024-10-31_06, 2024-10-31_12, 2024-10-31_18 into NSR2/data/processed/samples/202410.
 - 2026-02-09T20:56:27+00:00 | Verification: samples_202410 missing count -> 0/124; generated QA visualization outputs/qa/heatmap_oct31_18_compare.png and reran backend/scripts/audit_data_resources.py.
 - 2026-02-09T20:57:05+00:00 | Pre-submit validation: python -m pytest -q in backend -> 10 passed.
+- 2026-02-09T20:57:36+00:00 | Committed d45d523: docs: log Oct-31 sample backfill and validation.
+- 2026-02-09T20:57:36+00:00 | Pushed d45d523 to origin/main.
+- 2026-02-09T20:57:48+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 10 passed.
