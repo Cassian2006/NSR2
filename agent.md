@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T20:22:20+00:00
+Last updated: 2026-02-09T20:23:11+00:00
 
 ## Fixed Principles
 
@@ -38,3 +38,6 @@ Last updated: 2026-02-09T20:22:20+00:00
 - 2026-02-09T20:21:40+00:00 | Validation: `python -m compileall app scripts` (pass), `python -m pytest -q` (9 passed).
 - 2026-02-09T20:21:40+00:00 | Runtime check: generated month heatmaps with `--month 202407 --step-hours 24 --tag smoke24h` -> 31 files.
 - 2026-02-09T20:22:20+00:00 | Final pre-commit validation rerun: `python -m compileall app scripts` (pass), `python -m pytest -q` (9 passed).
+- 2026-02-09T20:22:53+00:00 | Committed `4c4d9af`: ignore local data + add local AIS heatmap generator and tests.
+- 2026-02-09T20:22:53+00:00 | Pushed `4c4d9af` to `origin/main`.
+- 2026-02-09T20:23:11+00:00 | Pre-submit test before log sync commit: `python -m pytest -q` in `backend` -> `9 passed`.
