@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T22:46:54+00:00
+Last updated: 2026-02-09T22:50:01+00:00
 
 ## Fixed Principles
 
@@ -95,3 +95,6 @@ Last updated: 2026-02-09T22:46:54+00:00
 - 2026-02-09T22:46:41+00:00 | Committed 24e8dcf: feat: import labelme mapping and run quick unet baseline.
 - 2026-02-09T22:46:41+00:00 | Pushed 24e8dcf to origin/main.
 - 2026-02-09T22:46:54+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 16 passed.
+- 2026-02-09T22:50:01+00:00 | Verified current labelme JSON quality: 32 *_riskhint.json all contain positive caution polygons (label=caution).
+- 2026-02-09T22:50:01+00:00 | Rebuilt labeled manifest from annotation_pack with --skip-empty-caution; result updated to rows=32 (train=26, val=6).
+- 2026-02-09T22:50:01+00:00 | Reran quick baseline with 32 labeled samples: outputs/train_runs/unet_quick_20260209_224924/summary.json (best val_loss=0.5048, val_miou=0.6021, val_iou_caution=0.2399, val_iou_blocked=0.8748).
