@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T20:57:48+00:00
+Last updated: 2026-02-09T21:18:51+00:00
 
 ## Fixed Principles
 
@@ -56,3 +56,9 @@ Last updated: 2026-02-09T20:57:48+00:00
 - 2026-02-09T20:57:36+00:00 | Committed d45d523: docs: log Oct-31 sample backfill and validation.
 - 2026-02-09T20:57:36+00:00 | Pushed d45d523 to origin/main.
 - 2026-02-09T20:57:48+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 10 passed.
+- 2026-02-09T21:18:51+00:00 | Generated NSR2 env grids from raw nc via NSRcorridorNA make_env_grids.py; patched missing 2024-10-31_06/12/18 by persistence copy from 2024-10-31_00; env total=492.
+- 2026-02-09T21:18:51+00:00 | Added U-Net data prep module: backend/app/preprocess/unet_dataset.py (stacking, blocked mask, label merge, quicklook helpers).
+- 2026-02-09T21:18:51+00:00 | Added scripts: backend/scripts/prepare_unet_annotation_pack.py and backend/scripts/build_unet_labels.py.
+- 2026-02-09T21:18:51+00:00 | Built full annotation pack (202407-202410): data/processed/annotation_pack (492 samples).
+- 2026-02-09T21:18:51+00:00 | Built training manifest: data/processed/unet_manifest.csv (train=368, val=124 with val_month=202410).
+- 2026-02-09T21:18:51+00:00 | Added tests: backend/tests/test_unet_dataset_prep.py; validation: python -m pytest -q -> 14 passed.
