@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import random
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,8 +12,13 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader, IterableDataset
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.model.tiny_unet import TinyUNet
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,6 +35,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--patch-size", type=int, default=192)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--focus-caution-prob",
+        type=float,
+        default=0.6,
+        help="Probability of sampling patches centered on caution pixels when available.",
+    )
+    p.add_argument(
+        "--aug-noise-std",
+        type=float,
+        default=0.03,
+        help="Gaussian noise std applied after normalization during training augment.",
+    )
+    p.add_argument(
+        "--aug-gamma-max",
+        type=float,
+        default=0.15,
+        help="Max absolute gamma jitter for training augment. 0 disables.",
+    )
     p.add_argument(
         "--out-dir",
         default="",
@@ -128,6 +152,9 @@ class RandomPatchDataset(IterableDataset):
         steps: int,
         seed: int,
         augment: bool,
+        focus_caution_prob: float = 0.6,
+        aug_noise_std: float = 0.03,
+        aug_gamma_max: float = 0.15,
     ) -> None:
         self.items = items
         self.mean = mean[:, None, None]
@@ -136,6 +163,53 @@ class RandomPatchDataset(IterableDataset):
         self.steps = steps
         self.seed = seed
         self.augment = augment
+        self.focus_caution_prob = float(max(0.0, min(1.0, focus_caution_prob)))
+        self.aug_noise_std = float(max(0.0, aug_noise_std))
+        self.aug_gamma_max = float(max(0.0, aug_gamma_max))
+
+    def _sample_patch_origin(
+        self,
+        y: np.ndarray,
+        h: int,
+        w: int,
+        ph: int,
+        pw: int,
+        rng: np.random.Generator,
+    ) -> tuple[int, int]:
+        if self.augment and rng.random() < self.focus_caution_prob:
+            ys, xs = np.where(y == 1)
+            if ys.size > 0:
+                k = int(rng.integers(0, ys.size))
+                cy = int(ys[k])
+                cx = int(xs[k])
+                top = int(np.clip(cy - ph // 2, 0, h - ph))
+                left = int(np.clip(cx - pw // 2, 0, w - pw))
+                return top, left
+        top = int(rng.integers(0, h - ph + 1)) if h > ph else 0
+        left = int(rng.integers(0, w - pw + 1)) if w > pw else 0
+        return top, left
+
+    def _apply_augment(
+        self, xp: np.ndarray, yp: np.ndarray, rng: np.random.Generator
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if rng.random() < 0.5:
+            xp = xp[:, :, ::-1].copy()
+            yp = yp[:, ::-1].copy()
+        if rng.random() < 0.3:
+            xp = xp[:, ::-1, :].copy()
+            yp = yp[::-1, :].copy()
+        # 90-degree rotations preserve masks exactly and improve orientation robustness.
+        if rng.random() < 0.5:
+            k = int(rng.integers(1, 4))
+            xp = np.rot90(xp, k=k, axes=(1, 2)).copy()
+            yp = np.rot90(yp, k=k, axes=(0, 1)).copy()
+        if self.aug_gamma_max > 0:
+            gamma = float(rng.uniform(-self.aug_gamma_max, self.aug_gamma_max))
+            xp = xp * (1.0 + gamma)
+        if self.aug_noise_std > 0:
+            noise = rng.normal(0.0, self.aug_noise_std, size=xp.shape).astype(np.float32)
+            xp = xp + noise
+        return xp.astype(np.float32), yp.astype(np.int64)
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
@@ -155,8 +229,7 @@ class RandomPatchDataset(IterableDataset):
             _, h, w = x.shape
             ph = min(self.patch, h)
             pw = min(self.patch, w)
-            top = int(rng.integers(0, h - ph + 1)) if h > ph else 0
-            left = int(rng.integers(0, w - pw + 1)) if w > pw else 0
+            top, left = self._sample_patch_origin(y, h, w, ph, pw, rng)
 
             xp = x[:, top : top + ph, left : left + pw].astype(np.float32)
             yp = y[top : top + ph, left : left + pw].astype(np.int64)
@@ -164,60 +237,9 @@ class RandomPatchDataset(IterableDataset):
             xp = (xp - self.mean) / self.std
 
             if self.augment:
-                if rng.random() < 0.5:
-                    xp = xp[:, :, ::-1].copy()
-                    yp = yp[:, ::-1].copy()
-                if rng.random() < 0.3:
-                    xp = xp[:, ::-1, :].copy()
-                    yp = yp[::-1, :].copy()
+                xp, yp = self._apply_augment(xp, yp, rng)
 
             yield torch.from_numpy(xp), torch.from_numpy(yp)
-
-
-class ConvBlock(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int) -> None:
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
-class TinyUNet(nn.Module):
-    def __init__(self, in_channels: int, n_classes: int = 3, base: int = 32) -> None:
-        super().__init__()
-        self.enc1 = ConvBlock(in_channels, base)
-        self.enc2 = ConvBlock(base, base * 2)
-        self.enc3 = ConvBlock(base * 2, base * 4)
-        self.bottleneck = ConvBlock(base * 4, base * 8)
-
-        self.dec3 = ConvBlock(base * 8 + base * 4, base * 4)
-        self.dec2 = ConvBlock(base * 4 + base * 2, base * 2)
-        self.dec1 = ConvBlock(base * 2 + base, base)
-        self.head = nn.Conv2d(base, n_classes, kernel_size=1)
-
-        self.pool = nn.MaxPool2d(2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x1 = self.enc1(x)
-        x2 = self.enc2(self.pool(x1))
-        x3 = self.enc3(self.pool(x2))
-        xb = self.bottleneck(self.pool(x3))
-
-        d3 = F.interpolate(xb, size=x3.shape[-2:], mode="bilinear", align_corners=False)
-        d3 = self.dec3(torch.cat([d3, x3], dim=1))
-        d2 = F.interpolate(d3, size=x2.shape[-2:], mode="bilinear", align_corners=False)
-        d2 = self.dec2(torch.cat([d2, x2], dim=1))
-        d1 = F.interpolate(d2, size=x1.shape[-2:], mode="bilinear", align_corners=False)
-        d1 = self.dec1(torch.cat([d1, x1], dim=1))
-        return self.head(d1)
 
 
 def run_epoch(
@@ -317,6 +339,9 @@ def main() -> None:
         steps=args.steps_per_epoch,
         seed=args.seed,
         augment=True,
+        focus_caution_prob=args.focus_caution_prob,
+        aug_noise_std=args.aug_noise_std,
+        aug_gamma_max=args.aug_gamma_max,
     )
     val_ds = RandomPatchDataset(
         items=val_items,
@@ -326,6 +351,9 @@ def main() -> None:
         steps=args.val_steps,
         seed=args.seed + 1000,
         augment=False,
+        focus_caution_prob=0.0,
+        aug_noise_std=0.0,
+        aug_gamma_max=0.0,
     )
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, num_workers=args.num_workers)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, num_workers=args.num_workers)
@@ -371,6 +399,9 @@ def main() -> None:
         "batch_size": args.batch_size,
         "patch_size": args.patch_size,
         "lr": args.lr,
+        "focus_caution_prob": args.focus_caution_prob,
+        "aug_noise_std": args.aug_noise_std,
+        "aug_gamma_max": args.aug_gamma_max,
         "in_channels": in_channels,
         "class_weights": class_weights.tolist(),
         "norm_mean": mean.tolist(),

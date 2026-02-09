@@ -34,6 +34,11 @@ def parse_args() -> argparse.Namespace:
         help="JSON suffix appended to blocked_{idx:03d}. Default: _riskhint.json",
     )
     p.add_argument(
+        "--name-template",
+        default="blocked_{idx:03d}{suffix}",
+        help="Template to build JSON filename from index and suffix. Fields: {idx}, {suffix}.",
+    )
+    p.add_argument(
         "--label",
         default="caution",
         help="Label name to extract from labelme JSONs.",
@@ -80,7 +85,7 @@ def main() -> None:
                 continue
             idx = int(idx_str)
 
-            json_name = f"blocked_{idx:03d}{args.json_suffix}"
+            json_name = args.name_template.format(idx=idx, suffix=args.json_suffix)
             json_path = source_dir / json_name
             if not json_path.exists():
                 missing_json += 1

@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T22:50:01+00:00
+Last updated: 2026-02-09T22:58:20+00:00
 
 ## Fixed Principles
 
@@ -98,3 +98,9 @@ Last updated: 2026-02-09T22:50:01+00:00
 - 2026-02-09T22:50:01+00:00 | Verified current labelme JSON quality: 32 *_riskhint.json all contain positive caution polygons (label=caution).
 - 2026-02-09T22:50:01+00:00 | Rebuilt labeled manifest from annotation_pack with --skip-empty-caution; result updated to rows=32 (train=26, val=6).
 - 2026-02-09T22:50:01+00:00 | Reran quick baseline with 32 labeled samples: outputs/train_runs/unet_quick_20260209_224924/summary.json (best val_loss=0.5048, val_miou=0.6021, val_iou_caution=0.2399, val_iou_blocked=0.8748).
+- 2026-02-09T22:58:20+00:00 | Added reusable TinyUNet module: backend/app/model/tiny_unet.py and test backend/tests/test_tiny_unet.py.
+- 2026-02-09T22:58:20+00:00 | Upgraded trainer backend/scripts/train_unet_quick.py with stronger augmentation options (rot90/gamma/noise) and caution-focused patch sampling.
+- 2026-02-09T22:58:20+00:00 | Added active learning script backend/scripts/active_learning_suggest.py; ranked 460 unlabeled candidates and exported top-20 set at outputs/active_learning/active_20260209_225559/labelme_active_topk.
+- 2026-02-09T22:58:20+00:00 | Updated import script backend/scripts/import_labelme_from_mapping.py to support configurable filename template for different label rounds.
+- 2026-02-09T22:58:20+00:00 | Training comparison runs completed: unet_quick_20260209_225653 and unet_quick_20260209_225723 (augmentation configs tested).
+- 2026-02-09T22:58:20+00:00 | Validation: python -m pytest -q -> 17 passed.
