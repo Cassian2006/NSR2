@@ -1,6 +1,6 @@
 # NSR2 Agent Operating Rules
 
-Last updated: 2026-02-09T22:46:13+00:00
+Last updated: 2026-02-09T22:46:54+00:00
 
 ## Fixed Principles
 
@@ -91,3 +91,7 @@ Last updated: 2026-02-09T22:46:13+00:00
 - 2026-02-09T22:46:13+00:00 | Fixed NaN instability in trainer by sanitizing non-finite inputs before stats/normalization.
 - 2026-02-09T22:46:13+00:00 | Baseline run complete: outputs/train_runs/unet_quick_20260209_224525/summary.json (best epoch=7, val_loss=0.5703, val_miou=0.5713, val_iou_caution=0.0923, val_iou_blocked=0.8563).
 - 2026-02-09T22:46:13+00:00 | Validation: python -m pytest -q -> 16 passed.
+- 2026-02-09T22:46:41+00:00 | Pre-submit validation before push: python -m pytest -q in backend -> 16 passed.
+- 2026-02-09T22:46:41+00:00 | Committed 24e8dcf: feat: import labelme mapping and run quick unet baseline.
+- 2026-02-09T22:46:41+00:00 | Pushed 24e8dcf to origin/main.
+- 2026-02-09T22:46:54+00:00 | Pre-submit validation before log-sync push: python -m pytest -q in backend -> 16 passed.
