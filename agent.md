@@ -204,3 +204,5 @@
 - 2026-02-10T16:25:13.7229874Z | Registered eval router in backend/app/main.py and extended smoke tests with test_eval_ais_backtest in backend/tests/test_api_smoke.py.
 - 2026-02-10T16:25:13.7229874Z | Extended frontend Export page with Run Backtest action and AIS metrics cards; wired runAisBacktest in frontend/src/api/client.ts.
 - 2026-02-10T16:25:13.7229874Z | Validation: python -m pytest -q (backend) -> 23 passed, 1 warning; npm run build (frontend) succeeded.
+- 2026-02-10T16:27:09.7965176Z | Rewrote readme.md in clean UTF-8 and synchronized it with current implementation state (React+Vite+FastAPI stack, real overlay/tile rendering, planning modes, gallery screenshot upload, AIS backtest API).
+- 2026-02-10T16:27:09.7965176Z | Validation before push: python -m pytest -q (backend) -> 23 passed, 1 warning; npm run build (frontend) succeeded.

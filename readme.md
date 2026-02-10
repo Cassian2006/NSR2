@@ -1,333 +1,273 @@
-NSR 避险航线规划系统 工程手则（Vue + Vite + FastAPI + Python）
-0. 项目目标与边界
-目标
+# NSR 避险航线规划系统（当前实现说明）
 
-在给定时间片（2024-07～2024-10）下，基于：
+最后更新：2026-02-10  
+技术栈（当前代码）：React + Vite + FastAPI + Python
 
-环境网格（Copernicus 冰/风/浪等）
+---
 
-水深网格（陆地/浅水禁行）
+## 0. 目标与边界
 
-AIS 走廊热力图（软偏好）
--（可选）AIS 轨迹（仅回测验证）
+在给定时间片（2024-07 ~ 2024-10）下，基于以下数据进行北极航线规划：
 
-实现：
+- 环境网格（冰/风/浪）
+- 水深与陆地禁行信息（blocked mask）
+- AIS 走廊热力图（软偏好）
+- U-Net 分割结果（SAFE/CAUTION/BLOCKED）
 
-图层浏览（多图层叠加、透明度、取值查看、对比）
+系统目标：
 
-交互式路线规划：点选起终点 → 规划 → 地图展示路线0
+- 图层浏览（多图层、透明度、取值与可视化）
+- 起终点交互选取并规划路线
+- 规划结果自动落到 Gallery
+- Gallery 支持查看、下载、删除
+- 路线可做 AIS 回测评估（第一版）
 
-Gallery：每次规划自动截图（路线+图层+图例）并保存展示，可下载/删除
+---
 
-最佳航线定义（强约束+弱偏好）
+## 1. 当前实现状态
 
-硬约束：禁止进入 BLOCKED（水深禁行 + U-Net 预测 BLOCKED）
+### 已完成
 
-主目标：在可行域内 距离最短
+- 后端核心接口：`/v1/datasets`、`/v1/timestamps`、`/v1/layers`
+- 图层渲染：`/v1/overlay/{layer}.png`、`/v1/tiles/{layer}/{z}/{x}/{y}.png`
+- U-Net 推理接口：`/v1/infer`（支持结果缓存）
+- 路线规划接口：`/v1/route/plan`（A* 网格规划）
+- Gallery 接口：列表、详情、图片、删除、前端截图上传
+- AIS 回测接口：`/v1/eval/ais/backtest`
+- 前端页面：场景选择、地图工作台、Gallery/Export
 
-弱偏好：在距离近似时，轻微偏向 AIS 走廊热力图高的区域（tie-breaker），避免“怪路/无人走廊”
+### 进行中/待优化
 
-备注：CAUTION 不作为硬禁行，第一版仅作为轻微惩罚或预算（避免大绕路）。
+- 经纬度到网格的映射当前仍是规则网格映射（通过配置边界），尚未接入真实仿射变换参数文件
+- 规划平滑策略为简化版，后续可升级 line-of-sight + 曲率约束
+- 前端打包体积偏大（Vite 警告 > 500KB），后续可拆包优化
 
-1. 技术栈
+---
 
-前端：Vue 3 + Vite + TypeScript（建议）
+## 2. 技术栈（与代码一致）
 
-地图：MapLibre GL JS（推荐）或 Leaflet
+- 前端：React 18 + Vite + TypeScript + Leaflet
+- 后端：FastAPI + Uvicorn
+- 算法与模型：Python + NumPy + PyTorch（TinyUNet 推理）
+- 数据存储：`npy` + `json`
 
-UI 设计：Figma（学术风简洁 dashboard）
+---
 
-后端：FastAPI + Uvicorn
+## 3. 数据约定
 
-核心：Python（数据对齐/推理/规划/导出）
+### 3.1 栅格与坐标
 
-模型：U-Net（语义分割：SAFE/CAUTION/BLOCKED）
+- 当前默认网格边界（可配置）：
+  - `grid_lat_min=60.0`
+  - `grid_lat_max=86.0`
+  - `grid_lon_min=-180.0`
+  - `grid_lon_max=180.0`
+- 所有核心网格默认按同一 `H x W` 对齐处理
 
-2. 数据约定（强制）
-2.1 坐标/栅格对齐
+### 3.2 关键文件（annotation pack）
 
-所有网格（env/bathy/ais_heatmap）必须在同一投影/同一分辨率/同一 H×W。
+每个时间片目录（如 `data/processed/annotation_pack/2024-07-01_00/`）包含：
 
-前端与 API 使用 WGS84 经纬度（EPSG:4326）传参；
+- `x_stack.npy`：多通道输入，形状 `(C,H,W)`
+- `blocked_mask.npy`：禁行掩膜，形状 `(H,W)`，`0/1`
+- `y_class.npy` 或相关标签文件（按训练流程使用）
+- `meta.json`：通道名、shape、规则说明
 
-服务端负责经纬度 → 网格 index（row, col）映射（使用你的对齐网格的仿射变换/经纬度数组）。
+### 3.3 类别编码
 
-2.2 文件命名与层定义
+- `0 = SAFE`
+- `1 = CAUTION`
+- `2 = BLOCKED`
 
-建议统一为：
+---
 
-env/{timestamp}.npy：float32，shape (C,H,W)
+## 4. 目录结构（当前）
 
-bathy/{timestamp}.npy 或 bathy/static.npy：float32，shape (H,W)（水深）
-
-ais_heatmap/{window}/{timestamp}.npy：float32，shape (H,W)（已对齐）
-
-unet_pred/{model_version}/{timestamp}.npy：uint8 或 float16，shape (H,W) 或 (3,H,W)
-
-2.3 类别编码（统一）
-
-0 = SAFE
-
-1 = CAUTION
-
-2 = BLOCKED
-
-水深禁行也最终要输出为 BLOCKED mask（bool 或 0/1）。
-
-3. 目录结构（推荐）
+```text
 repo/
   backend/
     app/
-      main.py
       api/
         routes_layers.py
         routes_infer.py
         routes_plan.py
         routes_gallery.py
+        routes_eval.py
       core/
         config.py
-        io.py
-        geo.py
-        tiling.py
-        render.py
+        dataset.py
         gallery.py
-      model/
-        unet.py
-        infer.py
-      planning/
-        grid_graph.py
-        router.py
-        smoothing.py
-        cost.py
+        render.py
+        schemas.py
       eval/
         compare_ais.py
-    requirements.txt
+      model/
+        infer.py
+        tiny_unet.py
+      planning/
+        router.py
+      main.py
+    tests/
   frontend/
     src/
       pages/
-        Viewer.vue
-        Gallery.vue
+        ScenarioSelector.tsx
+        MapWorkspace.tsx
+        ExportReport.tsx
       components/
-        LayerPanel.vue
-        InspectorPanel.vue
-        RoutePanel.vue
-        MapCanvas.vue
-        LegendCard.vue
+        MapCanvas.tsx
       api/
         client.ts
-      store/
-        layers.ts
-        route.ts
-      utils/
-        geo.ts
-    vite.config.ts
-  data/   (不建议直接进git，可放示例/小样)
+  data/
   outputs/
+    pred/
     gallery/
-      runs/
-      thumbs/
-  README.md
+  readme.md
+  agent.md
+```
 
-4. 后端 FastAPI 设计（必做接口）
-4.1 基础：数据与时间片
+---
 
-GET /v1/datasets
+## 5. 后端 API
 
-GET /v1/timestamps?month=2024-07
+### 5.1 数据与图层
 
-GET /v1/layers?timestamp=...
+- `GET /v1/datasets`
+- `GET /v1/timestamps?month=2024-07`
+- `GET /v1/layers?timestamp=...`
+- `GET /v1/overlay/{layer}.png?timestamp=...&bbox=...&size=...`
+- `GET /v1/tiles/{layer}/{z}/{x}/{y}.png?timestamp=...`
 
-返回可用 layer 列表、范围、单位、渲染建议
+支持 layer（当前）：
 
-4.2 图层渲染（给前端叠加）
+- `bathy`
+- `ais_heatmap`
+- `unet_pred`
+- `ice`
+- `wave`
+- `wind`
 
-两种方式二选一（推荐 Tiles）：
+### 5.2 推理与规划
 
-A. Tiles（推荐）
+- `POST /v1/infer`
+- `POST /v1/route/plan`
 
-GET /v1/tiles/{layer}/{z}/{x}/{y}.png?timestamp=...
+规划策略字段：
 
-B. Overlay（简单）
+- `blocked_sources` 支持 `bathy / unet_blocked / unet_caution`
+- `caution_mode` 支持 `tie_breaker / budget / minimize / strict`
 
-GET /v1/overlay/{layer}.png?timestamp=...&bbox=...&size=...
+### 5.3 Gallery
 
-4.3 U-Net 推理
+- `GET /v1/gallery/list`
+- `GET /v1/gallery/{id}`
+- `GET /v1/gallery/{id}/image.png`
+- `POST /v1/gallery/{id}/image`（前端截图上传）
+- `DELETE /v1/gallery/{id}`
 
-POST /v1/infer
+### 5.4 AIS 回测评估
 
-{ "timestamp": "...", "model_version": "unet_v1" }
+- `POST /v1/eval/ais/backtest`
 
+可传：
 
-返回：
+- `gallery_id`（推荐）
+- 或 `timestamp + route_geojson`
 
-{ "pred_layer": "unet_pred/unet_v1", "stats": {...} }
+返回指标（第一版）：
 
+- `top10pct_hit_rate`
+- `top25pct_hit_rate`
+- `median_or_higher_hit_rate`
+- `alignment_norm_0_1`
+- `alignment_zscore`
+- 以及路线与全局热力图统计
 
-推理结果应缓存落盘：outputs/pred/{model_version}/{timestamp}.npy
+---
 
-4.4 路线规划（交互核心）
+## 6. 前端功能（当前）
 
-POST /v1/route/plan
+### 6.1 ScenarioSelector
 
-{
-  "timestamp": "...",
-  "start": {"lat": 72.1, "lon": 60.2},
-  "goal": {"lat": 70.5, "lon": 150.7},
-  "policy": {
-    "objective": "shortest_distance_under_safety",
-    "blocked_sources": ["bathy", "unet_blocked"],
-    "caution_mode": "tie_breaker",
-    "corridor_bias": 0.2,
-    "smoothing": true
-  }
-}
+- 选择月份与时间片
+- 进入地图工作台
 
+### 6.2 MapWorkspace
 
-返回：
+- Leaflet 真地图
+- 图层开关 + 透明度
+- 地图点选起终点
+- 运行 U-Net 推理
+- 路径规划并展示 explain
+- 规划成功后自动截图并上传到 Gallery
 
-route_geojson（LineString + metrics）
+### 6.3 ExportReport（Gallery）
 
-explain（距离、穿越 caution 长度、走廊贴合度等）
+- 浏览历史规划记录
+- 查看元数据与预览图
+- 下载 GeoJSON/JSON/PNG
+- 删除记录
+- 一键运行 AIS 回测并展示指标
 
-gallery_id（本次自动截图保存后的记录 id）
+---
 
-4.5 Gallery（保存规划截图与元信息）
+## 7. 运行方式
 
-GET /v1/gallery/list
+### 7.1 后端
 
-GET /v1/gallery/{id}（元数据）
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-GET /v1/gallery/{id}/image.png
+### 7.2 前端
 
-DELETE /v1/gallery/{id}
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-5. 核心规划算法规范（避免绕路的关键）
-5.1 可行域
+可选环境变量：
 
-blocked = blocked_bathy OR blocked_unet
+- `VITE_API_BASE_URL`（默认 `http://127.0.0.1:8000/v1`）
+- `NSR_GRID_LAT_MIN / NSR_GRID_LAT_MAX / NSR_GRID_LON_MIN / NSR_GRID_LON_MAX`
 
-blocked_bathy：水深阈值 + 陆地
+---
 
-blocked_unet：U-Net 输出 class==2
+## 8. 测试与质量
 
-5.2 代价定义（第一版不调权重）
+后端测试：
 
-主代价：几何距离（网格步长）
+```bash
+cd backend
+python -m pytest -q
+```
 
-弱偏好（tie-breaker）：
+前端构建检查：
 
-进入 CAUTION：增加一个封顶的小惩罚（防止大绕路）
+```bash
+cd frontend
+npm run build
+```
 
-偏好走廊：AIS heatmap 高则给小奖励（或减少代价）
+当前状态：后端测试通过，前端可构建。
 
-关键：惩罚/奖励必须远小于“绕一大圈的距离差”，否则会再次绕路。
+---
 
-5.3 平滑
+## 9. 开发约定（执行中）
 
-A* 输出路径做后处理：
+- 每次推送前执行审查与测试（至少 `pytest`，前端改动时执行 `npm run build`）
+- 所有关键操作写入 `agent.md`（带时间戳）
+- 阶段性完成即提交并推送
+- `readme.md` 可持续更新与修正，以反映真实实现状态
 
-去锯齿（line-of-sight 简化）
+---
 
-曲率约束（可选）
+## 10. 下一步建议
 
-输出：
-
-raw_path + smoothed_path
-
-6. U-Net 推理规范
-6.1 输入标准化（必须固定尺度）
-
-每个通道使用全季节统计的 mean/std 或固定物理范围 clip
-
-禁止对每张图单独 min-max 拉伸（会学到伪影）
-
-6.2 输出
-
-推荐输出 prob (3,H,W)，前端显示 argmax
-
-同时可以保存 blocked_prob 作为不确定性可视化
-
-7. 前端 Vue 规范
-7.1 页面
-
-Viewer：地图 + 图层控制 + 取值检查 + 起终点选择 + 规划按钮
-
-Gallery：规划截图墙（缩略图+元信息），支持打开/下载/删除
-
-7.2 地图交互
-
-点选两次：设 start/goal
-
-Hover：显示 lat/lon + 当前激活层数值
-
-图层叠加：
-
-bathy mask
-
-ais heatmap
-
-unet pred
-
-route polyline（最上层）
-
-7.3 与后端对接
-
-所有请求走 src/api/client.ts
-
-规划后：
-
-渲染 route
-
-弹 toast
-
-自动跳转/刷新 Gallery（或右上角出现“Saved to Gallery”）
-
-8. 自动截图与 Gallery 保存（工程要点）
-
-截图应包含：路线、当前激活图层、图例、时间戳、起终点
-
-推荐实现方式：
-
-前端截图（canvas/map 导出）→ 上传到后端存储
-
-或后端渲染静态图（更一致，但开发稍重）
-
-Gallery 元数据建议存：timestamp、layers、start/goal、distance、caution_len、corridor_bias、model_version
-
-9. 日志、错误处理与性能
-
-后端：
-
-每个 timestamp 的推理与规划耗时记录
-
-缓存：预测结果与常用 overlay/png
-
-前端：
-
-请求中状态（loading）与失败提示
-
-大数组传输避免直接 JSON；图层用 PNG tile/overlay。
-
-10. 测试清单（最低要求）
-
-网格对齐一致性：env/bathy/ais_heatmap H×W 完全一致
-
-经纬度→网格索引正确性：随机点验证
-
-禁行正确性：路线不应进入 blocked
-
-规划稳定性：同起终点重复运行结果一致（或可解释）
-
-Gallery：保存/打开/下载/删除全流程
-
-11. 里程碑（推荐）
-
-M1：Layer Viewer（tiles/overlay + inspector + export）
-
-M2：U-Net infer 接入（unet_pred 显示）
-
-M3：Route planning（start/goal + route + explain）
-
-M4：Gallery（自动截图 + 管理）
-
-M5：AIS 回测评估（可选）
+- 引入真实地理仿射参数，替换规则网格映射
+- 增强路径平滑与可航行约束细节
+- 增加 AIS 回测批量报告与图表导出
+- 优化前端打包体积（按路由/页面拆包）
