@@ -322,13 +322,13 @@ export default function MapWorkspace() {
     display: "flex",
     flexDirection: useDesktopLayout ? "row" : "column",
     minHeight: "100%",
-    height: useDesktopLayout ? "100%" : "auto",
+    height: "auto",
   };
   const leftPaneStyle: CSSProperties = useDesktopLayout
     ? { width: 320, maxHeight: "none", minHeight: 0, borderBottomWidth: 0, borderRightWidth: 1 }
     : { width: "100%", maxHeight: "46vh", borderBottomWidth: 1, borderRightWidth: 0 };
   const mapPaneStyle: CSSProperties = useDesktopLayout
-    ? { minHeight: 0, height: "100%", flex: 1 }
+    ? { minHeight: "70vh", height: "70vh", flex: 1 }
     : { minHeight: "56vh", height: "56vh", width: "100%", flex: "0 0 auto" };
   const rightPaneStyle: CSSProperties = useDesktopLayout
     ? { width: 360, maxHeight: "none", minHeight: 0, borderTopWidth: 0, borderLeftWidth: 1 }
@@ -342,41 +342,40 @@ export default function MapWorkspace() {
   };
 
   return (
-    <div className="h-full overflow-auto bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
+    <div className="relative h-full overflow-auto bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
+      <div className="absolute right-3 top-3 z-20 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-md backdrop-blur-sm">
+        <div className="mb-1 text-[11px] text-slate-600">Layout</div>
+        <div className="flex gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant={layoutMode === "auto" ? "default" : "outline"}
+            onClick={() => setLayoutMode("auto")}
+          >
+            Auto
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={layoutMode === "desktop" ? "default" : "outline"}
+            onClick={() => setLayoutMode("desktop")}
+          >
+            Desktop
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={layoutMode === "mobile" ? "default" : "outline"}
+            onClick={() => setLayoutMode("mobile")}
+          >
+            Mobile
+          </Button>
+        </div>
+      </div>
       <div style={shellStyle}>
       <div className="bg-white border border-purple-200 flex flex-col shadow-lg" style={leftPaneStyle}>
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-6">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="mb-2 text-xs text-slate-600">Layout</div>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant={layoutMode === "auto" ? "default" : "outline"}
-                  className="flex-1"
-                  onClick={() => setLayoutMode("auto")}
-                >
-                  Auto
-                </Button>
-                <Button
-                  type="button"
-                  variant={layoutMode === "desktop" ? "default" : "outline"}
-                  className="flex-1"
-                  onClick={() => setLayoutMode("desktop")}
-                >
-                  Desktop
-                </Button>
-                <Button
-                  type="button"
-                  variant={layoutMode === "mobile" ? "default" : "outline"}
-                  className="flex-1"
-                  onClick={() => setLayoutMode("mobile")}
-                >
-                  Mobile
-                </Button>
-              </div>
-            </div>
-
             <div>
               <h3 className="mb-3 text-purple-900 flex items-center gap-2">
                 <div className="w-1 h-5 bg-purple-600 rounded-full"></div>

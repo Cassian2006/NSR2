@@ -321,3 +321,9 @@
 - 2026-02-10T21:13:54.3640120+00:00 | Pre-submit validation before single-service Docker push: python -m pytest -q (backend) -> 40 passed.
 - 2026-02-10T21:14:30.6758215+00:00 | Created commit afa155b (single-service Docker deploy + backend SPA hosting + workspace layout toggle updates) and pushed to origin/main.
 - 2026-02-10T21:14:54.5148271+00:00 | Pre-submit validation before log-sync push: python -m pytest -q (backend) -> 40 passed.
+- 2026-02-10T21:18:01.0731065+00:00 | UX hotfix for workspace visibility: moved layout mode switcher to always-visible top-right floating control in frontend/src/pages/MapWorkspace.tsx and enforced visible desktop map height (70vh) to avoid zero-height map container.
+- 2026-02-10T21:18:01.0731065+00:00 | Validation: npm run build (frontend) succeeded after workspace visibility hotfix.
+- 2026-02-10T21:19:35.6760408+00:00 | Fixed Render startup failure without torch: backend/app/model/infer.py now treats torch as optional runtime dependency (lazy checks/import path), so app boots even when torch is absent; /v1/infer returns clear error when on-demand inference is requested without torch.
+- 2026-02-10T21:19:35.6760408+00:00 | Added regression test backend/tests/test_infer_runtime.py for missing-torch error path.
+- 2026-02-10T21:19:35.6760408+00:00 | Validation: python -m pytest -q (backend) -> 41 passed; npm run build (frontend) succeeded.
+- 2026-02-10T21:20:56.4837433+00:00 | Pre-submit validation before missing-torch resilience push: python -m pytest -q (backend) -> 41 passed; npm run build (frontend) succeeded.

@@ -4,12 +4,18 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-import torch
-
 from app.core.config import Settings
-from app.model.tiny_unet import TinyUNet
+
+try:
+    import torch
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in non-torch deploy envs
+    torch = None  # type: ignore[assignment]
+    _torch_import_error: Exception | None = exc
+else:
+    _torch_import_error = None
 
 
 class InferenceError(RuntimeError):
@@ -18,19 +24,34 @@ class InferenceError(RuntimeError):
 
 @dataclass(frozen=True)
 class InferenceBundle:
-    model: TinyUNet
+    model: Any
     norm_mean: np.ndarray
     norm_std: np.ndarray
     device: str
+
+
+def _ensure_torch_available() -> None:
+    if torch is not None:
+        return
+    err_msg = (
+        "PyTorch is required for on-demand inference but is not installed in this runtime. "
+        "Install torch or pre-generate prediction caches under outputs/pred/<model_version>/<timestamp>.npy."
+    )
+    if _torch_import_error is not None:
+        err_msg = f"{err_msg} Original import error: {_torch_import_error}"
+    raise InferenceError(err_msg)
 
 
 def _load_checkpoint(ckpt_path: Path, device: str):
     """
     Prefer safer torch loading when available; fall back for older torch versions.
     """
+    _ensure_torch_available()
     try:
+        assert torch is not None
         return torch.load(ckpt_path, map_location=device, weights_only=True)
     except TypeError:
+        assert torch is not None
         return torch.load(ckpt_path, map_location=device)
 
 
@@ -88,6 +109,7 @@ def _resolve_ckpt_path(summary: dict, summary_path: Path) -> Path:
 
 @lru_cache(maxsize=8)
 def _load_bundle(summary_path_str: str) -> InferenceBundle:
+    _ensure_torch_available()
     summary_path = Path(summary_path_str)
     if not summary_path.exists():
         raise InferenceError(f"Summary file not found: {summary_path}")
@@ -109,6 +131,9 @@ def _load_bundle(summary_path_str: str) -> InferenceBundle:
     norm_std = np.where(norm_std < 1e-6, 1.0, norm_std)
 
     ckpt_path = _resolve_ckpt_path(summary, summary_path)
+
+    assert torch is not None
+    from app.model.tiny_unet import TinyUNet
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = TinyUNet(in_channels=in_channels, n_classes=3, base=24).to(device)
@@ -159,6 +184,7 @@ def run_unet_inference(
                 "model_version": model_version,
             }
 
+    _ensure_torch_available()
     summary_path = _resolve_summary_path(settings, model_version=model_version)
     bundle = _load_bundle(str(summary_path.resolve()))
     if x.shape[0] != bundle.norm_mean.shape[0]:
@@ -168,6 +194,7 @@ def run_unet_inference(
         )
 
     xn = (x - bundle.norm_mean[:, None, None]) / bundle.norm_std[:, None, None]
+    assert torch is not None
     xt = torch.from_numpy(xn[None, ...]).to(bundle.device)
     with torch.no_grad():
         logits = bundle.model(xt)
