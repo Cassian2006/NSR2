@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes_eval import router as eval_router
 from app.api.routes_gallery import router as gallery_router
 from app.api.routes_infer import router as infer_router
 from app.api.routes_layers import router as layers_router
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(infer_router, prefix="/v1")
     app.include_router(plan_router, prefix="/v1")
     app.include_router(gallery_router, prefix="/v1")
+    app.include_router(eval_router, prefix="/v1")
 
     @app.get("/healthz")
     def healthz() -> dict:
@@ -44,4 +46,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

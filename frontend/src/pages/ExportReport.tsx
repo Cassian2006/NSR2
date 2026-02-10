@@ -8,6 +8,8 @@ import {
   getGalleryImageUrl,
   getGalleryItem,
   getGalleryList,
+  runAisBacktest,
+  type AisBacktestMetrics,
   type GalleryItem,
 } from "../api/client";
 import StatCard from "../components/StatCard";
@@ -48,6 +50,8 @@ export default function ExportReport() {
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [backtest, setBacktest] = useState<AisBacktestMetrics | null>(null);
+  const [evaluating, setEvaluating] = useState(false);
 
   const loadList = async () => {
     setLoadingList(true);
@@ -77,6 +81,7 @@ export default function ExportReport() {
   useEffect(() => {
     if (!selectedId) {
       setSelectedItem(null);
+      setBacktest(null);
       return;
     }
     let active = true;
@@ -86,6 +91,7 @@ export default function ExportReport() {
         const detail = await getGalleryItem(selectedId);
         if (!active) return;
         setSelectedItem(detail);
+        setBacktest(null);
       } catch (error) {
         if (!active) return;
         toast.error(`Failed to load gallery item: ${String(error)}`);
@@ -141,6 +147,20 @@ export default function ExportReport() {
       toast.success("Image downloaded");
     } catch (error) {
       toast.error(String(error));
+    }
+  };
+
+  const handleRunBacktest = async () => {
+    if (!selectedItem) return;
+    setEvaluating(true);
+    try {
+      const res = await runAisBacktest({ gallery_id: selectedItem.id });
+      setBacktest(res.metrics);
+      toast.success("AIS backtest finished");
+    } catch (error) {
+      toast.error(`AIS backtest failed: ${String(error)}`);
+    } finally {
+      setEvaluating(false);
     }
   };
 
@@ -207,6 +227,22 @@ export default function ExportReport() {
                     <StatCard label="Corridor Bias" value={Number(selectedItem.corridor_bias ?? 0).toFixed(2)} />
                     <StatCard label="Model" value={String(selectedItem.model_version ?? "unet_v1")} />
                   </div>
+
+                  <div className="flex items-center justify-between rounded-lg border bg-white p-3">
+                    <div className="text-sm text-muted-foreground">AIS Backtest</div>
+                    <Button onClick={handleRunBacktest} variant="outline" disabled={evaluating} className="gap-2">
+                      {evaluating ? "Evaluating..." : "Run Backtest"}
+                    </Button>
+                  </div>
+
+                  {backtest ? (
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <StatCard label="Top10 Hit" value={(backtest.top10pct_hit_rate * 100).toFixed(1)} unit="%" />
+                      <StatCard label="Top25 Hit" value={(backtest.top25pct_hit_rate * 100).toFixed(1)} unit="%" />
+                      <StatCard label="Align (0-1)" value={backtest.alignment_norm_0_1.toFixed(3)} />
+                      <StatCard label="Z-Score" value={backtest.alignment_zscore.toFixed(2)} />
+                    </div>
+                  ) : null}
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="rounded-lg border bg-white p-3 text-sm">

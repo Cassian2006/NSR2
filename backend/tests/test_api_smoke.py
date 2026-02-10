@@ -124,6 +124,29 @@ def test_route_plan_modes(client: TestClient) -> None:
     assert explain["effective_caution_penalty"] > 0
 
 
+def test_eval_ais_backtest(client: TestClient) -> None:
+    ts = _pick_timestamp(client)
+    plan_payload = {
+        "timestamp": ts,
+        "start": {"lat": 78.2467, "lon": 15.4650},
+        "goal": {"lat": 81.5074, "lon": 58.3811},
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "tie_breaker",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+        },
+    }
+    plan = client.post("/v1/route/plan", json=plan_payload).json()
+    eval_resp = client.post("/v1/eval/ais/backtest", json={"gallery_id": plan["gallery_id"]})
+    assert eval_resp.status_code == 200
+    metrics = eval_resp.json()["metrics"]
+    assert "top10pct_hit_rate" in metrics
+    assert "alignment_norm_0_1" in metrics
+    assert 0.0 <= metrics["alignment_norm_0_1"] <= 1.0
+
+
 def test_infer_persists_file(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     infer_resp = client.post(

@@ -148,6 +148,29 @@ export async function uploadGalleryImage(galleryId: string, imageBase64: string)
   }
 }
 
+export type AisBacktestMetrics = {
+  timestamp: string;
+  source: string;
+  route_point_count: number;
+  route_inside_grid_ratio: number;
+  route_mean_heat: number;
+  route_p90_heat: number;
+  global_mean_heat: number;
+  global_p90_heat: number;
+  top10pct_hit_rate: number;
+  top25pct_hit_rate: number;
+  median_or_higher_hit_rate: number;
+  alignment_norm_0_1: number;
+  alignment_zscore: number;
+};
+
+export async function runAisBacktest(payload: { gallery_id?: string; timestamp?: string; route_geojson?: unknown }) {
+  return apiFetch<{ metrics: AisBacktestMetrics; gallery_id?: string; note?: string }>("/eval/ais/backtest", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getGalleryImageUrl(galleryId: string): string {
   return `${API_BASE}/gallery/${encodeURIComponent(galleryId)}/image.png`;
 }

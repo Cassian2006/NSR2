@@ -199,3 +199,8 @@
 - 2026-02-10T16:22:48.8920172Z | Added frontend API method uploadGalleryImage in frontend/src/api/client.ts and wired MapWorkspace automatic screenshot upload after successful route planning.
 - 2026-02-10T16:22:48.8920172Z | Integrated html2canvas dependency for front-end map capture; map pane is captured and uploaded as PNG data URL, with graceful fallback to backend preview on failure.
 - 2026-02-10T16:22:48.8920172Z | Validation: python -m pytest -q (backend) -> 22 passed, 1 warning; npm run build (frontend) succeeded.
+- 2026-02-10T16:25:13.7229874Z | Added AIS evaluation module backend/app/eval/compare_ais.py to score route-vs-heatmap quality (top10/top25 hit rates, normalized alignment, z-score, in-grid ratio).
+- 2026-02-10T16:25:13.7229874Z | Added backend API endpoint POST /v1/eval/ais/backtest in backend/app/api/routes_eval.py; supports gallery_id shortcut or explicit timestamp+route_geojson payload.
+- 2026-02-10T16:25:13.7229874Z | Registered eval router in backend/app/main.py and extended smoke tests with test_eval_ais_backtest in backend/tests/test_api_smoke.py.
+- 2026-02-10T16:25:13.7229874Z | Extended frontend Export page with Run Backtest action and AIS metrics cards; wired runAisBacktest in frontend/src/api/client.ts.
+- 2026-02-10T16:25:13.7229874Z | Validation: python -m pytest -q (backend) -> 23 passed, 1 warning; npm run build (frontend) succeeded.
