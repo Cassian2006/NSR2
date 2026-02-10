@@ -295,3 +295,5 @@
 - 2026-02-10T20:41:38.4607276+00:00 | Created commit 10ffc62: mobile responsive improvements, Render deployment config/docs, and ice-layer NaN visibility fix.
 - 2026-02-10T20:41:38.4607276+00:00 | Pushed commit 10ffc62 to origin/main (https://github.com/Cassian2006/NSR2.git).
 - 2026-02-10T20:42:09.8523456+00:00 | Pre-submit validation before log-sync push: python -m pytest -q (backend) -> 40 passed.
+- 2026-02-10T20:49:54.1383901+00:00 | Fixed Blueprint schema in render.yaml for Render compatibility: changed backend service key from runtime->env (python) and frontend service type from web/runtime:static to type:static.
+- 2026-02-10T20:50:37.1704382+00:00 | Pre-submit validation before Blueprint-fix push: python -m pytest -q (backend) -> 40 passed.

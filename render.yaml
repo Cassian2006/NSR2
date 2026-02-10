@@ -1,7 +1,7 @@
 services:
   - type: web
     name: nsr2-api
-    runtime: python
+    env: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -14,9 +14,8 @@ services:
       - key: NSR_CORS_ORIGINS
         sync: false
 
-  - type: web
+  - type: static
     name: nsr2-web
-    runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: build
