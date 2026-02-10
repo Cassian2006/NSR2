@@ -92,6 +92,27 @@ def test_route_plan_and_gallery(client: TestClient) -> None:
     assert len(image_resp.content) > 500
 
 
+def test_route_plan_modes(client: TestClient) -> None:
+    ts = _pick_timestamp(client)
+    payload = {
+        "timestamp": ts,
+        "start": {"lat": 78.2467, "lon": 15.4650},
+        "goal": {"lat": 81.5074, "lon": 58.3811},
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "minimize",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+        },
+    }
+    resp = client.post("/v1/route/plan", json=payload)
+    assert resp.status_code == 200
+    explain = resp.json()["explain"]
+    assert explain["caution_mode"] == "minimize"
+    assert explain["effective_caution_penalty"] > 0
+
+
 def test_infer_persists_file(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     infer_resp = client.post(

@@ -179,14 +179,20 @@ export default function MapWorkspace() {
     setPlanning(true);
     toast.loading(t("toast.planning"), { id: "plan-route" });
     try {
-      const cautionMode = cautionHandling === "tiebreaker" ? "tie_breaker" : cautionHandling;
+      const cautionMode = safetyPolicy === "strict" ? "strict" : cautionHandling === "tiebreaker" ? "tie_breaker" : cautionHandling;
+      const blockedSources =
+        safetyPolicy === "blocked-bathy-only"
+          ? ["bathy"]
+          : safetyPolicy === "strict"
+            ? ["bathy", "unet_blocked", "unet_caution"]
+            : ["bathy", "unet_blocked"];
       const response = await planRoute({
         timestamp,
         start: { lat: startLatNum, lon: startLonNum },
         goal: { lat: goalLatNum, lon: goalLonNum },
         policy: {
           objective: "shortest_distance_under_safety",
-          blocked_sources: safetyPolicy === "blocked-bathy-only" ? ["bathy"] : ["bathy", "unet_blocked"],
+          blocked_sources: blockedSources,
           caution_mode: cautionMode,
           corridor_bias: corridorBias[0] / 100,
           smoothing: true,

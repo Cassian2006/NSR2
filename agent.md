@@ -187,3 +187,9 @@
 - 2026-02-10T16:16:41.7045858Z | Migrated frontend map to real Leaflet integration in frontend/src/components/MapCanvas.tsx with OSM base map, backend overlay image layers, route polyline, start/goal markers, and map click coordinates.
 - 2026-02-10T16:16:41.7045858Z | Updated frontend/src/pages/MapWorkspace.tsx to pass timestamp into MapCanvas for dynamic layer rendering.
 - 2026-02-10T16:16:41.7045858Z | Validation: python -m pytest -q (backend) -> 21 passed, 1 warning; npm run build (frontend) succeeded after adding leaflet/react-leaflet@4.2.1.
+- 2026-02-10T16:19:47.2580727Z | Planning policy refinement: backend/app/planning/router.py now supports caution modes tie_breaker/budget/minimize/strict as effective cost policies; strict blocks unet caution cells via blocked_sources or caution_mode=strict.
+- 2026-02-10T16:19:47.2580727Z | Added explainability fields in route output: effective_caution_penalty, effective_corridor_reward, and grid_bounds for traceability.
+- 2026-02-10T16:19:47.2580727Z | Grid coordinate bounds made configurable in backend/app/core/config.py (grid_lat_min/max, grid_lon_min/max) and wired into planning/overlay mapping.
+- 2026-02-10T16:19:47.2580727Z | Updated frontend/src/pages/MapWorkspace.tsx strict policy mapping to send blocked_sources=[bathy,unet_blocked,unet_caution] and caution_mode=strict.
+- 2026-02-10T16:19:47.2580727Z | Extended backend/tests/test_api_smoke.py with route mode coverage (caution_mode=minimize) and verified effective penalty output.
+- 2026-02-10T16:19:47.2580727Z | Validation: python -m pytest -q (backend) -> 22 passed, 1 warning; npm run build (frontend) succeeded.

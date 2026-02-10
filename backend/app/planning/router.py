@@ -156,6 +156,10 @@ def plan_grid_route(
     smoothing: bool,
     blocked_sources: list[str],
 ) -> PlanResult:
+    valid_caution_modes = {"tie_breaker", "budget", "minimize", "strict"}
+    if caution_mode not in valid_caution_modes:
+        raise PlanningError(f"Unsupported caution_mode={caution_mode}, expected one of {sorted(valid_caution_modes)}")
+
     ann_dir = settings.annotation_pack_root / timestamp
     blocked_path = ann_dir / "blocked_mask.npy"
     if not blocked_path.exists():
@@ -178,6 +182,8 @@ def plan_grid_route(
     blocked = blocked_bathy.copy()
     if "unet_blocked" in blocked_sources:
         blocked |= unet_pred == 2
+    if "unet_caution" in blocked_sources or caution_mode == "strict":
+        blocked |= unet_pred == 1
     free_cells = np.argwhere(~blocked)
     if free_cells.size == 0:
         raise PlanningError("No navigable cells available after blocked-mask fusion.")
@@ -188,10 +194,10 @@ def plan_grid_route(
     ais_norm = ais / ais_max if ais_max > 1e-8 else np.zeros_like(ais)
 
     bounds = GridBounds(
-        lat_min=60.0,
-        lat_max=86.0,
-        lon_min=-180.0,
-        lon_max=180.0,
+        lat_min=float(settings.grid_lat_min),
+        lat_max=float(settings.grid_lat_max),
+        lon_min=float(settings.grid_lon_min),
+        lon_max=float(settings.grid_lon_max),
     )
     s_rc = _latlon_to_rc(start[0], start[1], h, w, bounds)
     g_rc = _latlon_to_rc(goal[0], goal[1], h, w, bounds)
@@ -202,8 +208,19 @@ def plan_grid_route(
     lon_step = (bounds.lon_max - bounds.lon_min) / max(1, w - 1)
     km_per_row = 111.32 * lat_step
     km_per_col_min = 111.32 * max(0.05, math.cos(math.radians(bounds.lat_max))) * lon_step
-    caution_penalty = 0.12 if caution_mode == "tie_breaker" else 0.0
-    corridor_reward = max(0.0, float(corridor_bias)) * 0.15
+    if caution_mode == "tie_breaker":
+        caution_penalty = 0.12
+        corridor_reward_scale = 0.15
+    elif caution_mode == "budget":
+        caution_penalty = 0.24
+        corridor_reward_scale = 0.08
+    elif caution_mode == "minimize":
+        caution_penalty = 0.45
+        corridor_reward_scale = 0.04
+    else:  # strict
+        caution_penalty = 0.0
+        corridor_reward_scale = 0.0
+    corridor_reward = max(0.0, float(corridor_bias)) * corridor_reward_scale
 
     gscore = np.full((h, w), np.inf, dtype=np.float64)
     closed = np.zeros((h, w), dtype=bool)
@@ -280,12 +297,20 @@ def plan_grid_route(
         "caution_len_km": round(float(caution_len_km), 3),
         "corridor_alignment": round(float(np.mean(corridor_vals) if corridor_vals else 0.0), 3),
         "caution_mode": caution_mode,
+        "effective_caution_penalty": round(float(caution_penalty), 4),
+        "effective_corridor_reward": round(float(corridor_reward), 4),
         "smoothing": bool(smoothing),
         "raw_points": len(raw_cells),
         "smoothed_points": len(cells),
         "start_adjusted": s_rc_adj != s_rc,
         "goal_adjusted": g_rc_adj != g_rc,
         "blocked_ratio": round(float(blocked.mean()), 4),
+        "grid_bounds": {
+            "lat_min": bounds.lat_min,
+            "lat_max": bounds.lat_max,
+            "lon_min": bounds.lon_min,
+            "lon_max": bounds.lon_max,
+        },
     }
 
     route_geojson = {

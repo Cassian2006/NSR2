@@ -32,13 +32,23 @@ class BBox:
 _GRID_BOUNDS = GridBounds(lat_min=60.0, lat_max=86.0, lon_min=-180.0, lon_max=180.0)
 
 
-def parse_bbox(raw: str | None) -> BBox:
+def _bounds_from_settings(settings: Settings) -> GridBounds:
+    return GridBounds(
+        lat_min=float(settings.grid_lat_min),
+        lat_max=float(settings.grid_lat_max),
+        lon_min=float(settings.grid_lon_min),
+        lon_max=float(settings.grid_lon_max),
+    )
+
+
+def parse_bbox(raw: str | None, *, bounds: GridBounds | None = None) -> BBox:
+    b = bounds or _GRID_BOUNDS
     if not raw:
         return BBox(
-            min_lon=_GRID_BOUNDS.lon_min,
-            min_lat=_GRID_BOUNDS.lat_min,
-            max_lon=_GRID_BOUNDS.lon_max,
-            max_lat=_GRID_BOUNDS.lat_max,
+            min_lon=b.lon_min,
+            min_lat=b.lat_min,
+            max_lon=b.lon_max,
+            max_lat=b.lat_max,
         )
     parts = [p.strip() for p in raw.split(",")]
     if len(parts) != 4:
@@ -115,17 +125,17 @@ def _lerp_palette(norm: np.ndarray, stops: list[tuple[float, tuple[int, int, int
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int) -> tuple[np.ndarray, np.ndarray]:
+def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int, *, bounds: GridBounds) -> tuple[np.ndarray, np.ndarray]:
     h, w = data.shape
     lats = np.linspace(bbox.max_lat, bbox.min_lat, out_h, dtype=np.float64)
     lons = np.linspace(bbox.min_lon, bbox.max_lon, out_w, dtype=np.float64)
 
-    lat_in = (lats >= _GRID_BOUNDS.lat_min) & (lats <= _GRID_BOUNDS.lat_max)
-    lon_in = (lons >= _GRID_BOUNDS.lon_min) & (lons <= _GRID_BOUNDS.lon_max)
+    lat_in = (lats >= bounds.lat_min) & (lats <= bounds.lat_max)
+    lon_in = (lons >= bounds.lon_min) & (lons <= bounds.lon_max)
     inside = lat_in[:, None] & lon_in[None, :]
 
-    row = np.rint((_GRID_BOUNDS.lat_max - lats) / (_GRID_BOUNDS.lat_max - _GRID_BOUNDS.lat_min) * (h - 1)).astype(np.int64)
-    col = np.rint((lons - _GRID_BOUNDS.lon_min) / (_GRID_BOUNDS.lon_max - _GRID_BOUNDS.lon_min) * (w - 1)).astype(np.int64)
+    row = np.rint((bounds.lat_max - lats) / (bounds.lat_max - bounds.lat_min) * (h - 1)).astype(np.int64)
+    col = np.rint((lons - bounds.lon_min) / (bounds.lon_max - bounds.lon_min) * (w - 1)).astype(np.int64)
     row = np.clip(row, 0, h - 1)
     col = np.clip(col, 0, w - 1)
 
@@ -256,11 +266,12 @@ def render_overlay_png(
     width: int,
     height: int,
 ) -> bytes:
+    bounds = _bounds_from_settings(settings)
     grid = _load_layer_grid(settings, timestamp, layer)
     if grid is None or grid.ndim != 2:
         return _encode_png_rgba(_empty_image(width, height))
 
-    sampled, inside = _sample_grid(grid.astype(np.float32), bbox, width, height)
+    sampled, inside = _sample_grid(grid.astype(np.float32), bbox, width, height, bounds=bounds)
 
     if layer == "bathy":
         image = _render_bathy(sampled, inside)

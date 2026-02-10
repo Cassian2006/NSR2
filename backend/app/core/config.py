@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     pred_root: Path = outputs_root / "pred"
     unet_default_summary: Path = outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    grid_lat_min: float = 60.0
+    grid_lat_max: float = 86.0
+    grid_lon_min: float = -180.0
+    grid_lon_max: float = 180.0
 
     @property
     def cors_origin_list(self) -> list[str]:

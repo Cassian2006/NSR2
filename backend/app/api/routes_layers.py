@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.core.dataset import get_dataset_service, normalize_timestamp, ui_timestamp
-from app.core.render import parse_bbox, parse_size, render_overlay_png, tile_bbox
+from app.core.render import GridBounds, parse_bbox, parse_size, render_overlay_png, tile_bbox
 from app.core.config import get_settings
 
 
@@ -38,7 +38,15 @@ def get_overlay(layer: str, timestamp: str = Query(...), bbox: str | None = None
     settings = get_settings()
     try:
         normalized = normalize_timestamp(timestamp)
-        parsed_bbox = parse_bbox(bbox)
+        parsed_bbox = parse_bbox(
+            bbox,
+            bounds=GridBounds(
+                lat_min=settings.grid_lat_min,
+                lat_max=settings.grid_lat_max,
+                lon_min=settings.grid_lon_min,
+                lon_max=settings.grid_lon_max,
+            ),
+        )
         width, height = parse_size(size, fallback_w=1024, fallback_h=768)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
