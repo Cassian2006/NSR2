@@ -267,3 +267,7 @@
 - 2026-02-10T18:13:55.0198695+00:00 | Added hover-detail panels (HoverCard) on gallery run items to show detailed policy and route-result metrics on mouse-over.
 - 2026-02-10T18:13:55.0198695+00:00 | Added backend API regression assertion in backend/tests/test_api_smoke.py for gallery action/result/timeline fields after route planning.
 - 2026-02-10T18:13:55.0198695+00:00 | Validation: python -m pytest -q (backend) -> 37 passed; npm run build (frontend) succeeded; backend restarted and /healthz returned ok.
+- 2026-02-10T18:15:29.0964668+00:00 | Added dataset month alias handling in backend/app/core/dataset.py: /v1/timestamps now treats month=all (or *) as full 2024-07~2024-10 timestamp set.
+- 2026-02-10T18:15:29.0964668+00:00 | Updated frontend/src/pages/ScenarioSelector.tsx dataset selector to include `all` option and request full timestamp list when selected.
+- 2026-02-10T18:15:29.0964668+00:00 | Added backend API regression test test_timestamps_all_alias_returns_full_set in backend/tests/test_api_smoke.py.
+- 2026-02-10T18:15:29.0964668+00:00 | Validation: python -m pytest -q (backend) -> 38 passed; npm run build (frontend) succeeded.

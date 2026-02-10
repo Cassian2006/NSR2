@@ -27,8 +27,8 @@ const RECOMMENDED_SNAPSHOTS: Snapshot[] = [
 export default function ScenarioSelector() {
   const navigate = useNavigate();
   const { t } = useLanguage();
-  const [months, setMonths] = useState<string[]>(["2024-07", "2024-08", "2024-09", "2024-10"]);
-  const [selectedMonth, setSelectedMonth] = useState("2024-08");
+  const [months, setMonths] = useState<string[]>(["all", "2024-07", "2024-08", "2024-09", "2024-10"]);
+  const [selectedMonth, setSelectedMonth] = useState("all");
   const [timestamps, setTimestamps] = useState<string[]>([]);
   const [selectedTimestamp, setSelectedTimestamp] = useState("");
   const [selectedSnapshot, setSelectedSnapshot] = useState<string | null>(null);
@@ -39,10 +39,12 @@ export default function ScenarioSelector() {
     async function loadDatasetInfo() {
       try {
         const res = await getDatasets();
-        const nextMonths = res.dataset.months.length ? res.dataset.months : months;
+        const rawMonths = res.dataset.months.length ? res.dataset.months : months.filter((m) => m !== "all");
+        const normalizedMonths = Array.from(new Set(rawMonths));
+        const nextMonths = ["all", ...normalizedMonths];
         if (active) {
           setMonths(nextMonths);
-          setSelectedMonth((prev) => (nextMonths.includes(prev) ? prev : nextMonths[0]));
+          setSelectedMonth((prev) => (nextMonths.includes(prev) ? prev : "all"));
         }
       } catch (error) {
         console.warn("datasets api unavailable, using defaults", error);
@@ -59,7 +61,7 @@ export default function ScenarioSelector() {
     setLoading(true);
     async function loadTimestamps() {
       try {
-        const res = await getTimestamps(selectedMonth);
+        const res = await getTimestamps(selectedMonth === "all" ? undefined : selectedMonth);
         if (!active) return;
         setTimestamps(res.timestamps);
         setSelectedTimestamp((prev) => (res.timestamps.includes(prev) ? prev : res.timestamps[0] ?? ""));
@@ -111,7 +113,7 @@ export default function ScenarioSelector() {
                     <SelectContent>
                       {months.map((month) => (
                         <SelectItem key={month} value={month}>
-                          {month}
+                          {month === "all" ? "All (2024-07 to 2024-10)" : month}
                         </SelectItem>
                       ))}
                     </SelectContent>

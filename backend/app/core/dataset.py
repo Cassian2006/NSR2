@@ -84,7 +84,7 @@ class DatasetService:
 
     def list_timestamps(self, month: str | None = None) -> list[str]:
         all_ts = sorted(self._scan_samples().keys())
-        if month:
+        if month and month.lower() not in {"all", "*"}:
             return [ts for ts in all_ts if ts.startswith(month)]
         return all_ts
 

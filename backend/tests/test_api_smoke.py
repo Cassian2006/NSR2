@@ -62,6 +62,14 @@ def test_layers(client: TestClient) -> None:
     assert isinstance(heat_item["available"], bool)
 
 
+def test_timestamps_all_alias_returns_full_set(client: TestClient) -> None:
+    full = client.get("/v1/timestamps")
+    all_alias = client.get("/v1/timestamps", params={"month": "all"})
+    assert full.status_code == 200
+    assert all_alias.status_code == 200
+    assert full.json().get("timestamps", []) == all_alias.json().get("timestamps", [])
+
+
 def test_overlay_and_tile_png(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     overlay = client.get(
