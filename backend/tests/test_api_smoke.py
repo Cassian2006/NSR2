@@ -40,6 +40,14 @@ def test_datasets(client: TestClient) -> None:
     assert "dataset" in resp.json()
 
 
+def test_cors_allows_local_dev_origin(client: TestClient) -> None:
+    origin = "http://127.0.0.1:5178"
+    resp = client.get("/v1/datasets", headers={"Origin": origin})
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == origin
+    assert resp.headers.get("access-control-allow-credentials") == "true"
+
+
 def test_layers(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     resp = client.get("/v1/layers", params={"timestamp": ts})

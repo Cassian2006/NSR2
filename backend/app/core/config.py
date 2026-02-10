@@ -19,7 +19,13 @@ class Settings(BaseSettings):
     gallery_root: Path = outputs_root / "gallery"
     pred_root: Path = outputs_root / "pred"
     unet_default_summary: Path = outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174,"
+        "http://localhost:5178,http://127.0.0.1:5178,"
+        "http://localhost:5179,http://127.0.0.1:5179"
+    )
+    cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
     grid_lat_min: float = 60.0
     grid_lat_max: float = 86.0
     grid_lon_min: float = -180.0

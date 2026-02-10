@@ -229,3 +229,12 @@
 - 2026-02-10T16:52:14.5875271Z | Validation: python -m pytest -q (backend) -> 31 passed, 1 warning.
 - 2026-02-10T16:53:12.2692579Z | Hardened model checkpoint loading in backend/app/model/infer.py: added _load_checkpoint() to prefer torch.load(..., weights_only=True) with backward-compatible fallback for older torch versions.
 - 2026-02-10T16:53:12.2692579Z | Validation: python -m pytest -q (backend) -> 31 passed, 0 warnings.
+- 2026-02-10T17:02:57.5745463Z | Started isolated runtime pair for manual UI testing due occupied default ports: backend on http://127.0.0.1:8001 (uvicorn) and frontend on http://127.0.0.1:5178 (vite).
+- 2026-02-10T17:02:57.5745463Z | Added local dev override frontend/.env.local with VITE_API_BASE_URL=http://127.0.0.1:8001/v1 to ensure frontend requests reach NSR backend instance.
+- 2026-02-10T17:03:07.8685136Z | Started isolated runtime pair for manual UI testing due occupied default ports: backend on http://127.0.0.1:8001 and frontend on http://127.0.0.1:5178.
+- 2026-02-10T17:03:07.8685136Z | Added local dev override frontend/.env.local with VITE_API_BASE_URL=http://127.0.0.1:8001/v1.
+- 2026-02-10T17:03:07.8685136Z | Runtime checks passed: backend /healthz responded OK and frontend at 127.0.0.1:5178 serves Arctic Sea Route Planner UI.
+- 2026-02-10T17:35:55.3960624Z | Fixed local runtime CORS mismatch causing map overlay requests to be blocked from non-5173 frontend ports: expanded default cors_origins and added cors_origin_regex in backend/app/core/config.py; wired allow_origin_regex in backend/app/main.py.
+- 2026-02-10T17:35:55.3960624Z | Added backend CORS regression test test_cors_allows_local_dev_origin in backend/tests/test_api_smoke.py (Origin 127.0.0.1:5178 receives access-control-allow-origin echo).
+- 2026-02-10T17:35:55.3960624Z | Fixed workspace sidebar scroll behavior by adding min-h-0/overflow constraints to pane containers and ScrollArea roots in frontend/src/pages/MapWorkspace.tsx.
+- 2026-02-10T17:35:55.3960624Z | Validation: backend pytest 32 passed; frontend build succeeded; runtime verification: /v1/datasets and /v1/overlay now return CORS headers for Origin http://127.0.0.1:5178.

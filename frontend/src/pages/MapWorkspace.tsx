@@ -290,9 +290,9 @@ export default function MapWorkspace() {
   const mapGoal = { lat: Number.parseFloat(goalLat) || 0, lon: Number.parseFloat(goalLon) || 0 };
 
   return (
-    <div className="h-full flex bg-gradient-to-br from-gray-50 to-slate-100">
-      <div className="w-[320px] bg-white border-r border-purple-200 flex flex-col shadow-lg">
-        <ScrollArea className="flex-1">
+    <div className="h-full min-h-0 overflow-hidden flex bg-gradient-to-br from-gray-50 to-slate-100">
+      <div className="w-[320px] min-h-0 bg-white border-r border-purple-200 flex flex-col shadow-lg">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="p-4 space-y-6">
             <div>
               <h3 className="mb-3 text-purple-900 flex items-center gap-2">
@@ -471,7 +471,7 @@ export default function MapWorkspace() {
         </ScrollArea>
       </div>
 
-      <div className="flex-1 relative" ref={mapCaptureRef}>
+      <div className="flex-1 min-h-0 relative" ref={mapCaptureRef}>
         <MapCanvas
           timestamp={timestamp}
           layers={layers}
@@ -504,8 +504,8 @@ export default function MapWorkspace() {
         </div>
       </div>
 
-      <div className="w-[360px] bg-white border-l border-border flex flex-col">
-        <ScrollArea className="flex-1">
+      <div className="w-[360px] min-h-0 bg-white border-l border-border flex flex-col">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="p-4 space-y-6">
             <div>
               <h3 className="mb-3">{t("summary.title")}</h3>
