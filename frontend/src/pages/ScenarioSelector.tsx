@@ -16,12 +16,12 @@ type Snapshot = {
 };
 
 const RECOMMENDED_SNAPSHOTS: Snapshot[] = [
-  { id: "week-28", label: "Week 28", period: "2024-07-08 to 2024-07-14" },
-  { id: "week-32", label: "Week 32", period: "2024-08-05 to 2024-08-11" },
-  { id: "week-36", label: "Week 36", period: "2024-09-02 to 2024-09-08" },
-  { id: "week-40", label: "Week 40", period: "2024-09-30 to 2024-10-06" },
-  { id: "week-42", label: "Week 42", period: "2024-10-14 to 2024-10-20" },
-  { id: "week-44", label: "Week 44", period: "2024-10-28 to 2024-11-03" },
+  { id: "week-28", label: "第28周", period: "2024-07-08 至 2024-07-14" },
+  { id: "week-32", label: "第32周", period: "2024-08-05 至 2024-08-11" },
+  { id: "week-36", label: "第36周", period: "2024-09-02 至 2024-09-08" },
+  { id: "week-40", label: "第40周", period: "2024-09-30 至 2024-10-06" },
+  { id: "week-42", label: "第42周", period: "2024-10-14 至 2024-10-20" },
+  { id: "week-44", label: "第44周", period: "2024-10-28 至 2024-11-03" },
 ];
 
 export default function ScenarioSelector() {
@@ -113,7 +113,7 @@ export default function ScenarioSelector() {
                     <SelectContent>
                       {months.map((month) => (
                         <SelectItem key={month} value={month}>
-                          {month === "all" ? "All (2024-07 to 2024-10)" : month}
+                          {month === "all" ? "全部（2024-07 至 2024-10）" : month}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -124,7 +124,7 @@ export default function ScenarioSelector() {
                   <Label htmlFor="timestamp">{t("scenario.timestamp")}</Label>
                   <Select value={selectedTimestamp} onValueChange={setSelectedTimestamp} disabled={loading || !timestampOptions.length}>
                     <SelectTrigger id="timestamp">
-                      <SelectValue placeholder={loading ? "Loading..." : "No timestamp"} />
+                      <SelectValue placeholder={loading ? "加载中..." : "暂无时间片"} />
                     </SelectTrigger>
                     <SelectContent>
                       {timestampOptions.map((ts) => (

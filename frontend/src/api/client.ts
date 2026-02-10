@@ -64,6 +64,7 @@ export type RoutePlanRequest = {
     caution_mode: string;
     corridor_bias: number;
     smoothing: boolean;
+    planner?: string;
   };
 };
 
@@ -81,6 +82,16 @@ export type RoutePlanResponse = {
     [key: string]: unknown;
   };
   gallery_id: string;
+  progress_id?: string;
+  resolved?: {
+    requested_date?: string;
+    requested_hour?: number;
+    progress_id?: string;
+    used_timestamp?: string;
+    source?: string;
+    note?: string;
+  };
+  latest_meta?: Record<string, unknown>;
 };
 
 export type GalleryItem = {
@@ -177,6 +188,94 @@ export async function planRoute(payload: RoutePlanRequest) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function planLatestRoute(payload: {
+  date: string;
+  hour?: number;
+  force_refresh?: boolean;
+  progress_id?: string;
+  start: { lat: number; lon: number };
+  goal: { lat: number; lon: number };
+  policy: {
+    objective: string;
+    blocked_sources: string[];
+    caution_mode: string;
+    corridor_bias: number;
+    smoothing: boolean;
+    planner?: string;
+  };
+}) {
+  return apiFetch<RoutePlanResponse>("/latest/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      date: payload.date,
+      hour: payload.hour ?? 12,
+      force_refresh: payload.force_refresh ?? true,
+      progress_id: payload.progress_id,
+      start: payload.start,
+      goal: payload.goal,
+      policy: payload.policy,
+    }),
+  });
+}
+
+export type CopernicusConfigPayload = {
+  username?: string;
+  password?: string;
+  ice_dataset_id?: string;
+  wave_dataset_id?: string;
+  wind_dataset_id?: string;
+  ice_var?: string;
+  ice_thick_var?: string;
+  wave_var?: string;
+  wind_u_var?: string;
+  wind_v_var?: string;
+};
+
+export async function setCopernicusConfig(payload: CopernicusConfigPayload) {
+  return apiFetch<{
+    ok: boolean;
+    configured: boolean;
+    datasets: Record<string, string>;
+    variables: Record<string, string>;
+  }>("/latest/copernicus/config", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getCopernicusConfig() {
+  return apiFetch<{
+    configured: boolean;
+    username_set: boolean;
+    password_set: boolean;
+    datasets: Record<string, string>;
+    variables: Record<string, string>;
+  }>("/latest/copernicus/config");
+}
+
+export async function getLatestStatus(timestamp: string) {
+  return apiFetch<{
+    timestamp: string;
+    has_latest_meta: boolean;
+    meta: Record<string, unknown>;
+  }>(`/latest/status?timestamp=${encodeURIComponent(timestamp)}`);
+}
+
+export type LatestProgress = {
+  progress_id: string;
+  exists: boolean;
+  status: "running" | "completed" | "failed" | "not_found" | string;
+  phase: string;
+  message: string;
+  percent: number;
+  error?: string | null;
+  updated_at?: string;
+};
+
+export async function getLatestProgress(progressId: string) {
+  return apiFetch<LatestProgress>(`/latest/progress?progress_id=${encodeURIComponent(progressId)}`);
 }
 
 export async function runInference(payload: { timestamp: string; model_version?: string }) {

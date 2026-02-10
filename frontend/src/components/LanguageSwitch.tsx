@@ -1,12 +1,11 @@
-import { useLanguage } from "../contexts/LanguageContext";
+﻿import { useLanguage } from "../contexts/LanguageContext";
 import { Button } from "./ui/button";
-import { Languages } from "lucide-react";
 
 export default function LanguageSwitch() {
   const { language, setLanguage } = useLanguage();
 
   return (
-    <div className="flex items-center gap-1 bg-secondary/50 rounded-lg p-1">
+    <div className="flex items-center gap-1 rounded-lg bg-secondary/50 p-1">
       <Button
         variant={language === "en" ? "default" : "ghost"}
         size="sm"

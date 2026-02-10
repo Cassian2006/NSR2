@@ -33,7 +33,7 @@ function downloadJsonFile(filename: string, payload: unknown) {
 async function downloadImageFile(filename: string, imageUrl: string) {
   const res = await fetch(imageUrl);
   if (!res.ok) {
-    throw new Error(`Failed to download image: HTTP ${res.status}`);
+    throw new Error(`下载图片失败：HTTP ${res.status}`);
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -126,13 +126,14 @@ export default function ExportReport() {
     const r = item.result;
     const distance = Number(r?.distance_km ?? item.distance_km ?? 0).toFixed(1);
     const caution = Number(r?.caution_len_km ?? item.caution_len_km ?? 0).toFixed(1);
-    const status = String(r?.status ?? "success");
-    return `${status} | ${distance} km | caution ${caution} km`;
+    const rawStatus = String(r?.status ?? "success");
+    const status = rawStatus === "success" ? "成功" : rawStatus;
+    return `${status} | ${distance} km | 谨慎区 ${caution} km`;
   };
 
   const handleDelete = async () => {
     if (!selectedItem) return;
-    const ok = window.confirm(`Delete gallery item ${selectedItem.id}?`);
+    const ok = window.confirm(`确定删除记录 ${selectedItem.id} 吗？`);
     if (!ok) return;
     try {
       await deleteGalleryItem(selectedItem.id);
@@ -200,7 +201,7 @@ export default function ExportReport() {
           <Card>
             <CardHeader>
               <CardTitle>{t("export.savedRuns")}</CardTitle>
-              <CardDescription>{items.length} item(s)</CardDescription>
+              <CardDescription>{items.length} 条记录</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {items.length === 0 ? (
@@ -220,26 +221,26 @@ export default function ExportReport() {
                           <div className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</div>
                           <div className="font-mono text-sm">{item.id}</div>
                           <div className="text-sm">{item.timestamp}</div>
-                          <div className="text-xs text-muted-foreground">action: {getActionSummary(item)}</div>
-                          <div className="text-xs text-muted-foreground">result: {getResultSummary(item)}</div>
+                          <div className="text-xs text-muted-foreground">输入：{getActionSummary(item)}</div>
+                          <div className="text-xs text-muted-foreground">结果：{getResultSummary(item)}</div>
                         </button>
                       </HoverCardTrigger>
                       <HoverCardContent className="w-[min(24rem,80vw)] space-y-2">
-                        <div className="text-sm font-semibold">Route Plan Detail</div>
-                        <div className="text-xs text-muted-foreground">action</div>
+                        <div className="text-sm font-semibold">路径规划详情</div>
+                        <div className="text-xs text-muted-foreground">输入</div>
                         <div className="text-xs font-mono">{getActionSummary(item)}</div>
                         <div className="text-xs text-muted-foreground">
-                          policy: {String(item.action?.policy?.caution_mode ?? "tie_breaker")} | blocked:{" "}
-                          {Array.isArray(item.action?.policy?.blocked_sources) ? item.action?.policy?.blocked_sources?.join(", ") : "n/a"} | smooth:{" "}
-                          {item.action?.policy?.smoothing ? "true" : "false"} | bias: {Number(item.action?.policy?.corridor_bias ?? item.corridor_bias ?? 0).toFixed(2)}
+                          策略：{String(item.action?.policy?.caution_mode ?? "tie_breaker")} | 禁行来源：{" "}
+                          {Array.isArray(item.action?.policy?.blocked_sources) ? item.action?.policy?.blocked_sources?.join(", ") : "无"} | 平滑：{" "}
+                          {item.action?.policy?.smoothing ? "是" : "否"} | 走廊偏好：{Number(item.action?.policy?.corridor_bias ?? item.corridor_bias ?? 0).toFixed(2)}
                         </div>
-                        <div className="text-xs text-muted-foreground">result</div>
+                        <div className="text-xs text-muted-foreground">结果</div>
                         <div className="text-xs">{getResultSummary(item)}</div>
                         <div className="text-xs text-muted-foreground">
-                          points: {Number(item.result?.raw_points ?? item.explain?.raw_points ?? 0)} {"->"}{" "}
-                          {Number(item.result?.smoothed_points ?? item.explain?.smoothed_points ?? 0)} | adjusted start/goal:{" "}
-                          {item.result?.start_adjusted || item.explain?.start_adjusted ? "Y" : "N"}/
-                          {item.result?.goal_adjusted || item.explain?.goal_adjusted ? "Y" : "N"} | corridor:{" "}
+                          点数：{Number(item.result?.raw_points ?? item.explain?.raw_points ?? 0)} {"->"}{" "}
+                          {Number(item.result?.smoothed_points ?? item.explain?.smoothed_points ?? 0)} | 起终点自动调整：{" "}
+                          {item.result?.start_adjusted || item.explain?.start_adjusted ? "是" : "否"}/
+                          {item.result?.goal_adjusted || item.explain?.goal_adjusted ? "是" : "否"} | 走廊对齐：{" "}
                           {Number(item.result?.corridor_alignment ?? item.explain?.corridor_alignment ?? 0).toFixed(3)}
                         </div>
                       </HoverCardContent>
@@ -266,7 +267,7 @@ export default function ExportReport() {
                     <StatCard label={t("summary.distance")} value={Number(selectedItem.distance_km ?? 0).toFixed(1)} unit="km" />
                     <StatCard label={t("summary.caution")} value={cautionPct.toFixed(1)} unit="%" variant="warning" />
                     <StatCard label={t("workspace.corridorBias")} value={Number(selectedItem.corridor_bias ?? 0).toFixed(2)} />
-                    <StatCard label="Model" value={String(selectedItem.model_version ?? "unet_v1")} />
+                    <StatCard label="模型" value={String(selectedItem.model_version ?? "unet_v1")} />
                   </div>
 
                   <div className="flex flex-col gap-3 rounded-lg border bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -278,10 +279,10 @@ export default function ExportReport() {
 
                   {backtest ? (
                     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                      <StatCard label="Top10 Hit" value={(backtest.top10pct_hit_rate * 100).toFixed(1)} unit="%" />
-                      <StatCard label="Top25 Hit" value={(backtest.top25pct_hit_rate * 100).toFixed(1)} unit="%" />
-                      <StatCard label="Align (0-1)" value={backtest.alignment_norm_0_1.toFixed(3)} />
-                      <StatCard label="Z-Score" value={backtest.alignment_zscore.toFixed(2)} />
+                      <StatCard label="Top10 命中率" value={(backtest.top10pct_hit_rate * 100).toFixed(1)} unit="%" />
+                      <StatCard label="Top25 命中率" value={(backtest.top25pct_hit_rate * 100).toFixed(1)} unit="%" />
+                      <StatCard label="对齐度 (0-1)" value={backtest.alignment_norm_0_1.toFixed(3)} />
+                      <StatCard label="Z 分数" value={backtest.alignment_zscore.toFixed(2)} />
                     </div>
                   ) : null}
 
@@ -301,19 +302,19 @@ export default function ExportReport() {
                   </div>
 
                   <div className="rounded-lg border bg-white p-3 text-sm space-y-2">
-                    <div className="text-muted-foreground">Action & Result</div>
-                    <div className="font-mono text-xs">action: {getActionSummary(selectedItem)}</div>
+                    <div className="text-muted-foreground">输入与结果</div>
+                    <div className="font-mono text-xs">输入：{getActionSummary(selectedItem)}</div>
                     <div className="text-xs text-muted-foreground">
-                      result: {getResultSummary(selectedItem)} | points{" "}
+                      结果：{getResultSummary(selectedItem)} | 点数{" "}
                       {Number(selectedItem.result?.raw_points ?? selectedItem.explain?.raw_points ?? 0)} {"->"}{" "}
                       {Number(selectedItem.result?.smoothed_points ?? selectedItem.explain?.smoothed_points ?? 0)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      policy: {String(selectedItem.action?.policy?.caution_mode ?? "tie_breaker")} | blocked:{" "}
+                      策略：{String(selectedItem.action?.policy?.caution_mode ?? "tie_breaker")} | 禁行来源：{" "}
                       {Array.isArray(selectedItem.action?.policy?.blocked_sources)
                         ? selectedItem.action?.policy?.blocked_sources?.join(", ")
-                        : "n/a"}{" "}
-                      | smooth: {selectedItem.action?.policy?.smoothing ? "true" : "false"} | bias:{" "}
+                        : "无"}{" "}
+                      | 平滑：{selectedItem.action?.policy?.smoothing ? "是" : "否"} | 偏好：{" "}
                       {Number(selectedItem.action?.policy?.corridor_bias ?? selectedItem.corridor_bias ?? 0).toFixed(2)}
                     </div>
                   </div>

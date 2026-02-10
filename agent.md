@@ -329,3 +329,43 @@
 - 2026-02-10T21:20:56.4837433+00:00 | Pre-submit validation before missing-torch resilience push: python -m pytest -q (backend) -> 41 passed; npm run build (frontend) succeeded.
 - 2026-02-10T21:21:25.2290682+00:00 | Created commit 974656a (missing-torch startup resilience + workspace layout fallback visibility fix) and pushed to origin/main.
 - 2026-02-10T21:21:52.3627306+00:00 | Pre-submit validation before log-sync push: python -m pytest -q (backend) -> 41 passed.
+- 2026-02-10T21:32:41.5117591+00:00 | Added backend `latest` planning pipeline: new /v1/latest/plan endpoint (backend/app/api/routes_latest.py) with timestamp resolution/fallback logic in backend/app/core/latest.py and optional remote snapshot hook via NSR_LATEST_SNAPSHOT_URL_TEMPLATE/NSR_LATEST_SNAPSHOT_TOKEN.
+- 2026-02-10T21:32:41.5117591+00:00 | Added planner switch support end-to-end: policy.planner in backend/app/core/schemas.py, routes_plan passthrough, and router support for `astar` + `dstar_lite` mode in backend/app/planning/router.py.
+- 2026-02-10T21:32:41.5117591+00:00 | Enhanced workspace UX in frontend/src/pages/MapWorkspace.tsx: guaranteed visible Auto/Desktop/Mobile controls (floating + sidebar), planner selector, robust desktop map pane sizing, and "Predict Latest + Plan" action.
+- 2026-02-10T21:32:41.5117591+00:00 | Updated frontend API client for latest planning and planner propagation in frontend/src/api/client.ts.
+- 2026-02-10T21:32:41.5117591+00:00 | Added backend API regression coverage in backend/tests/test_api_smoke.py for dstar_lite mode and /v1/latest/plan fallback path.
+- 2026-02-10T21:32:41.5117591+00:00 | Validation: python -m pytest -q (backend) -> 42 passed; npm run build (frontend) succeeded.
+- 2026-02-10T21:48:32.0257626+00:00 | Added planner benchmark script backend/scripts/benchmark_planners.py and executed same-scenario A* vs D*Lite benchmark on 17 timestamps; outputs written to backend/outputs/benchmarks/planner_benchmark_20260210_214735.{csv,json}.
+- 2026-02-10T21:48:32.0257626+00:00 | Benchmark result summary: both planners success_rate=1.0 with identical route metrics across all 17 scenario pairs (diff pairs=0); avg runtime A*=3032ms vs D*Lite=5896ms.
+- 2026-02-10T21:48:32.0257626+00:00 | Extended latest pipeline for live environment ingestion: added backend/app/core/copernicus_live.py and upgraded backend/app/core/latest.py to build latest annotation_pack snapshots from Copernicus (ice/wave/wind) + template bathy/AIS into 7-channel x_stack compatible with current U-Net.
+- 2026-02-10T21:48:32.0257626+00:00 | Added Copernicus config and latest metadata APIs in backend/app/api/routes_latest.py: POST/GET /v1/latest/copernicus/config and GET /v1/latest/status; /v1/latest/plan now returns latest_meta.
+- 2026-02-10T21:48:32.0257626+00:00 | Updated frontend latest workflow in frontend/src/pages/MapWorkspace.tsx and frontend/src/api/client.ts: Copernicus account/dataset config form, latest planning trigger, auto-enable live layers (ice/wave/wind), and source/stats panel for newly pulled grids.
+- 2026-02-10T21:48:32.0257626+00:00 | Validation: python -m pytest -q (backend) -> 43 passed; npm run build (frontend) succeeded.
+- 2026-02-10T21:54:12.3950985+00:00 | Enabled backend local env-file loading in backend/app/core/config.py (reads backend/.env) and extended .gitignore to cover backend/.env.local.
+- 2026-02-10T21:54:12.3950985+00:00 | Wrote user-provided Copernicus account credentials into local git-ignored backend/.env; left dataset IDs empty for later fill.
+- 2026-02-10T21:54:12.3950985+00:00 | Verified runtime config load via get_settings(): username_set=True, password_set=True.
+- 2026-02-10T22:04:38.8488599Z | Updated Copernicus live ingestion to channel-wise partial pulling in backend/app/core/copernicus_live.py (independent ice/wave/wind variable fetch; per-channel failure no longer blocks latest materialization).
+- 2026-02-10T22:04:38.8488599Z | Fixed latest pipeline integration in backend/app/core/latest.py to consume pull_latest_env_partial fields map, and record channel_source/pulled_channels/notes in latest_meta.
+- 2026-02-10T22:04:38.8488599Z | Unified Copernicus readiness semantics in backend/app/api/routes_latest.py: configured now follows partial-ready helper (credentials + at least one dataset id).
+- 2026-02-10T22:04:38.8488599Z | Validation: python -m pytest -q (backend) -> 43 passed.
+- 2026-02-10T22:04:38.8488599Z | Validation: npm run build (frontend) succeeded.
+- 2026-02-10T22:06:08.0995995Z | Manual runtime test: POST /v1/latest/plan with date=2025-02-02 hour=12 returned 200; resolved_source=nearest_local_fallback; used_timestamp=2024-10-31_18; planner=dstar_lite; note='latest snapshot URL template is not configured'.
+- 2026-02-10T23:03:28.0471048Z | Improved Copernicus pull efficiency in backend/app/core/copernicus_live.py: grouped channel requests by dataset_id and fetched union variables in one subset call per dataset; changed time window to exact target_time (start=end) for faster latest pulls.
+- 2026-02-10T23:03:28.0471048Z | Updated backend/app/core/latest.py: latest materialized packs now persist template grid axes (target_lat/target_lon) in meta.json to keep geo mapping consistent for future timestamps.
+- 2026-02-10T23:03:28.0471048Z | Added force-refresh support for latest planning: backend/app/core/schemas.py (LatestPlanRequest.force_refresh), backend/app/core/latest.py (resolve_latest_timestamp force_refresh), backend/app/api/routes_latest.py passthrough and resolved metadata echo.
+- 2026-02-10T23:03:28.0471048Z | Added latest-plan resilience in backend/app/api/routes_latest.py: if live+UNet blocking yields no-feasible-route, automatically retry with blocked_sources=['bathy'] and expose planning_fallback note.
+- 2026-02-10T23:03:28.0471048Z | Set local Copernicus live config in backend/.env (git-ignored) to working Arctic datasets: ice/wind proxy from cmems_mod_arc_phy_anfc_6km_detided_PT1H-i (siconc/sithick/vxo/vyo), wave from cmems_mod_glo_wav_anfc_0.083deg_PT3H-i (VHM0).
+- 2026-02-10T23:03:28.0471048Z | Real-time test passed: POST /v1/latest/plan with date=2025-02-02 hour=12 force_refresh=true -> status 200, source=copernicus_live, used_timestamp=2025-02-02_12, pulled_channels=[ice_conc, ice_thick, wave_hs, wind_u10, wind_v10], route returned (distance_km=3612.874).
+- 2026-02-10T23:03:28.0471048Z | Validation: python -m pytest -q (backend) -> 43 passed.
+- 2026-02-10T23:03:28.0471048Z | Validation: npm run build (frontend) succeeded.
+- 2026-02-10T23:12:57.0899642Z | Added latest progress tracking backend module backend/app/core/latest_progress.py (thread-safe in-memory status store: start/update/complete/fail/get).
+- 2026-02-10T23:12:57.0899642Z | Extended latest request schema with progress_id in backend/app/core/schemas.py and wired force-refresh/progress callback flow in backend/app/core/latest.py + backend/app/core/copernicus_live.py.
+- 2026-02-10T23:12:57.0899642Z | Added API endpoint GET /v1/latest/progress in backend/app/api/routes_latest.py and integrated progress updates throughout latest plan lifecycle (resolve/download/plan/done/error).
+- 2026-02-10T23:12:57.0899642Z | Added frontend progress polling and UI bar for latest workflow in frontend/src/pages/MapWorkspace.tsx, using new client helper getLatestProgress in frontend/src/api/client.ts and Progress component.
+- 2026-02-10T23:12:57.0899642Z | Added backend regression test test_latest_progress_endpoint in backend/tests/test_api_smoke.py.
+- 2026-02-10T23:12:57.0899642Z | Validation: python -m pytest -q (backend) -> 44 passed; npm run build (frontend) succeeded; manual latest progress smoke test returned status=completed percent=100.
+- 2026-02-10T23:18:37.6600062Z | Localized latest-progress workflow to Chinese: backend progress messages (routes_latest.py, latest.py, copernicus_live.py, latest_progress.py) and frontend progress UI/status/toast text in frontend/src/pages/MapWorkspace.tsx.
+- 2026-02-10T23:18:37.6600062Z | Validation after Chinese localization: python -m pytest -q (backend) -> 44 passed; npm run build (frontend) succeeded.
+- 2026-02-10T23:30:08.8972577Z | Frontend full-Chinese pass: localized remaining visible English UI strings in App/Scenario/Workspace/Export and component labels; set default language to zh in frontend/src/contexts/LanguageContext.tsx.
+- 2026-02-10T23:30:08.8972577Z | Corrected MapWorkspace latest workflow messages and labels to Chinese, fixed accidental property rename back to res.configured, and standardized latest progress/status copy.
+- 2026-02-10T23:30:08.8972577Z | Validation before GitHub submit: python -m pytest -q (backend) -> 44 passed; npm run build (frontend) succeeded.

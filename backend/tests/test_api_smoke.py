@@ -145,6 +145,7 @@ def test_route_plan_modes(client: TestClient) -> None:
             "caution_mode": "minimize",
             "corridor_bias": 0.2,
             "smoothing": True,
+            "planner": "dstar_lite",
         },
     }
     resp = client.post("/v1/route/plan", json=payload)
@@ -152,6 +153,69 @@ def test_route_plan_modes(client: TestClient) -> None:
     explain = resp.json()["explain"]
     assert explain["caution_mode"] == "minimize"
     assert explain["effective_caution_penalty"] > 0
+    assert explain["planner"] == "dstar_lite"
+
+
+def test_latest_plan_fallback(client: TestClient) -> None:
+    payload = {
+        "date": "2024-10-15",
+        "hour": 12,
+        "start": TEST_START,
+        "goal": TEST_GOAL,
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "tie_breaker",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+            "planner": "dstar_lite",
+        },
+    }
+    resp = client.post("/v1/latest/plan", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["route_geojson"]["geometry"]["type"] == "LineString"
+    assert "resolved" in body
+    assert body["resolved"]["source"] in {"local_existing", "remote_snapshot", "nearest_local_fallback"}
+
+
+def test_latest_progress_endpoint(client: TestClient) -> None:
+    progress_id = "progress-missing-smoke"
+    missing = client.get("/v1/latest/progress", params={"progress_id": progress_id})
+    assert missing.status_code == 200
+    payload = missing.json()
+    assert payload["exists"] is False
+    assert payload["status"] == "not_found"
+    assert payload["progress_id"] == progress_id
+
+
+def test_copernicus_config_endpoints(client: TestClient) -> None:
+    set_resp = client.post(
+        "/v1/latest/copernicus/config",
+        json={
+            "username": "demo_user",
+            "password": "demo_pass",
+            "ice_dataset_id": "ice_ds",
+            "wave_dataset_id": "wave_ds",
+            "wind_dataset_id": "wind_ds",
+        },
+    )
+    assert set_resp.status_code == 200
+    payload = set_resp.json()
+    assert payload["ok"] is True
+
+    get_resp = client.get("/v1/latest/copernicus/config")
+    assert get_resp.status_code == 200
+    cfg = get_resp.json()
+    assert "configured" in cfg
+    assert cfg["username_set"] is True
+    assert cfg["password_set"] is True
+
+    status_resp = client.get("/v1/latest/status", params={"timestamp": "2024-07-01_00"})
+    assert status_resp.status_code == 200
+    st = status_resp.json()
+    assert st["timestamp"] == "2024-07-01_00"
+    assert "has_latest_meta" in st
 
 
 def test_route_plan_is_stable_and_stays_out_of_blocked(client: TestClient) -> None:

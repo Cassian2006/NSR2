@@ -1,4 +1,4 @@
-import { Copy, MapPin } from "lucide-react";
+﻿import { Copy, MapPin } from "lucide-react";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
@@ -35,7 +35,7 @@ export default function CoordinateInput({
         <div className="space-y-1">
           <Input
             type="text"
-            placeholder="Latitude"
+            placeholder="纬度"
             value={lat}
             onChange={(e) => onLatChange(e.target.value)}
             className="font-mono text-sm"
@@ -44,7 +44,7 @@ export default function CoordinateInput({
         <div className="space-y-1">
           <Input
             type="text"
-            placeholder="Longitude"
+            placeholder="经度"
             value={lon}
             onChange={(e) => onLonChange(e.target.value)}
             className="font-mono text-sm"

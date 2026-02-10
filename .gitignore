@@ -15,6 +15,7 @@ backend/.mypy_cache/
 # runtime outputs
 outputs/
 backend/.env
+backend/.env.local
 
 # local datasets (not committed)
 data/**

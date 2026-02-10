@@ -7,7 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="NSR_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="NSR_",
+        extra="ignore",
+        env_file=Path(__file__).resolve().parents[2] / ".env",
+        env_file_encoding="utf-8",
+    )
 
     project_root: Path = Path(__file__).resolve().parents[3]
     data_root: Path = project_root / "data"
@@ -21,6 +26,19 @@ class Settings(BaseSettings):
     pred_root: Path = outputs_root / "pred"
     frontend_dist_root: Path = project_root / "frontend" / "build"
     unet_default_summary: Path = outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
+    latest_snapshot_url_template: str = ""
+    latest_snapshot_token: str = ""
+    copernicus_username: str = ""
+    copernicus_password: str = ""
+    copernicus_ice_dataset_id: str = "cmems_mod_arc_phy_anfc_6km_detided_PT1H-i"
+    copernicus_ice_var: str = "siconc"
+    copernicus_ice_thick_var: str = "sithick"
+    copernicus_wave_dataset_id: str = "cmems_mod_glo_wav_anfc_0.083deg_PT3H-i"
+    copernicus_wave_var: str = "VHM0"
+    copernicus_wind_dataset_id: str = "cmems_mod_arc_phy_anfc_6km_detided_PT1H-i"
+    copernicus_wind_u_var: str = "vxo"
+    copernicus_wind_v_var: str = "vyo"
+    copernicus_request_timeout_sec: int = 180
     cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:5174,http://127.0.0.1:5174,"

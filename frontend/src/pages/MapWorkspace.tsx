@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
@@ -6,9 +6,14 @@ import { toast } from "sonner";
 import {
   getErrorMessage,
   getLayers,
+  getLatestProgress,
+  getLatestStatus,
   getTimestamps,
+  getCopernicusConfig,
+  planLatestRoute,
   planRoute,
   runInference,
+  setCopernicusConfig,
   uploadGalleryImage,
   type InferResponse,
   type RoutePlanResponse,
@@ -21,6 +26,7 @@ import StatCard from "../components/StatCard";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Label } from "../components/ui/label";
+import { Progress } from "../components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Slider } from "../components/ui/slider";
 import { useLanguage } from "../contexts/LanguageContext";
@@ -80,12 +86,53 @@ export default function MapWorkspace() {
   const [corridorBias, setCorridorBias] = useState([20]);
   const [routeResult, setRouteResult] = useState<RoutePlanResponse | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [latestPlanning, setLatestPlanning] = useState(false);
   const [pickTarget, setPickTarget] = useState<"start" | "goal" | null>(null);
   const [inferring, setInferring] = useState(false);
   const [inferResult, setInferResult] = useState<InferResponse | null>(null);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("auto");
   const [isWideViewport, setIsWideViewport] = useState(false);
+  const [plannerMode, setPlannerMode] = useState("dstar_lite");
+  const [latestDate, setLatestDate] = useState(() => {
+    const now = new Date();
+    const yyyy = now.getUTCFullYear();
+    const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(now.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  });
   const mapCaptureRef = useRef<HTMLDivElement | null>(null);
+  const [copernicusForm, setCopernicusForm] = useState({
+    username: "",
+    password: "",
+    ice_dataset_id: "",
+    wave_dataset_id: "",
+    wind_dataset_id: "",
+  });
+  const [copernicusConfigured, setCopernicusConfigured] = useState(false);
+  const [latestMeta, setLatestMeta] = useState<Record<string, unknown> | null>(null);
+  const [latestProgress, setLatestProgress] = useState({
+    progressId: "",
+    status: "idle",
+    phase: "idle",
+    message: "",
+    percent: 0,
+    error: "",
+    visible: false,
+  });
+  const latestProgressTimerRef = useRef<number | null>(null);
+
+  const stopLatestProgressPolling = useCallback(() => {
+    if (latestProgressTimerRef.current !== null) {
+      window.clearInterval(latestProgressTimerRef.current);
+      latestProgressTimerRef.current = null;
+    }
+  }, []);
+
+  const normalizedTsToUi = useCallback((value: string) => {
+    const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})$/.exec(value.trim());
+    if (!match) return value;
+    return `${match[1]}-${match[2]}:00`;
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -99,6 +146,12 @@ export default function MapWorkspace() {
     mql.addListener(apply);
     return () => mql.removeListener(apply);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      stopLatestProgressPolling();
+    };
+  }, [stopLatestProgressPolling]);
 
   useEffect(() => {
     let active = true;
@@ -120,6 +173,29 @@ export default function MapWorkspace() {
       active = false;
     };
   }, [queryTimestamp]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCopernicusStatus() {
+      try {
+        const res = await getCopernicusConfig();
+        if (!active) return;
+        setCopernicusConfigured(res.configured);
+        setCopernicusForm((prev) => ({
+          ...prev,
+          ice_dataset_id: String(res.datasets?.ice_dataset_id ?? ""),
+          wave_dataset_id: String(res.datasets?.wave_dataset_id ?? ""),
+          wind_dataset_id: String(res.datasets?.wind_dataset_id ?? ""),
+        }));
+      } catch {
+        // keep local defaults
+      }
+    }
+    loadCopernicusStatus();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const refreshLayerAvailability = useCallback(async (ts: string) => {
     const res = await getLayers(ts);
@@ -184,6 +260,25 @@ export default function MapWorkspace() {
     [routeMetrics]
   );
 
+  const latestPhaseText = useMemo(() => {
+    const phase = latestProgress.phase || "unknown";
+    const labels: Record<string, string> = {
+      idle: "空闲",
+      init: "初始化",
+      prepare: "准备模板",
+      download: "下载网格",
+      merge: "合并通道",
+      materialize: "写入快照",
+      snapshot: "快照下载",
+      resolve: "解析时间片",
+      plan: "路径规划",
+      done: "完成",
+      error: "失败",
+      unknown: "未知",
+    };
+    return labels[phase] ?? phase;
+  }, [latestProgress.phase]);
+
   const handleOpenLatestGallery = () => {
     if (!routeResult?.gallery_id) return;
     navigate(`/export?gallery=${encodeURIComponent(routeResult.gallery_id)}`);
@@ -243,20 +338,171 @@ export default function MapWorkspace() {
           caution_mode: cautionMode,
           corridor_bias: corridorBias[0] / 100,
           smoothing: true,
+          planner: plannerMode,
         },
       });
       setRouteResult(response);
       const startAdjusted = Boolean(response.explain?.["start_adjusted"]);
       const goalAdjusted = Boolean(response.explain?.["goal_adjusted"]);
       if (startAdjusted || goalAdjusted) {
-        toast.warning("Start/Goal adjusted to nearest navigable cell", { id: "plan-adjusted" });
+        toast.warning("起点/终点已自动调整到最近可航行网格", { id: "plan-adjusted" });
       }
-      toast.success(`${t("toast.success")} (Gallery: ${response.gallery_id})`, { id: "plan-route" });
+      toast.success(`${t("toast.success")}（记录：${response.gallery_id}）`, { id: "plan-route" });
       void captureAndUploadGalleryImage(response.gallery_id);
     } catch (error) {
       toast.error(`${t("toast.planFailed")}: ${getErrorMessage(error)}`, { id: "plan-route" });
     } finally {
       setPlanning(false);
+    }
+  };
+
+  const handlePlanLatestRoute = async () => {
+    const startLatNum = Number.parseFloat(startLat);
+    const startLonNum = Number.parseFloat(startLon);
+    const goalLatNum = Number.parseFloat(goalLat);
+    const goalLonNum = Number.parseFloat(goalLon);
+    if ([startLatNum, startLonNum, goalLatNum, goalLonNum].some((v) => Number.isNaN(v))) {
+      toast.error(t("toast.invalidCoords"));
+      return;
+    }
+    if (!latestDate) {
+      toast.error("请选择最新预测日期");
+      return;
+    }
+    const progressId = `latest-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    stopLatestProgressPolling();
+    setLatestProgress({
+      progressId,
+      status: "running",
+      phase: "init",
+      message: "正在准备最新预测流程...",
+      percent: 1,
+      error: "",
+      visible: true,
+    });
+    setLatestPlanning(true);
+    setPlanning(true);
+    toast.loading("正在使用最新预报进行规划...", { id: "plan-latest-route" });
+    const pollOnce = async () => {
+      try {
+        const p = await getLatestProgress(progressId);
+        setLatestProgress((prev) => ({
+          ...prev,
+          progressId,
+          status: p.status,
+          phase: p.phase ?? prev.phase,
+          message: p.message ?? prev.message,
+          percent: Number.isFinite(p.percent) ? p.percent : prev.percent,
+          error: typeof p.error === "string" ? p.error : "",
+          visible: true,
+        }));
+        if (p.status === "completed" || p.status === "failed") {
+          stopLatestProgressPolling();
+        }
+      } catch {
+        // Keep UI responsive even if one polling round fails.
+      }
+    };
+    void pollOnce();
+    latestProgressTimerRef.current = window.setInterval(() => {
+      void pollOnce();
+    }, 1200);
+    try {
+      const cautionMode = safetyPolicy === "strict" ? "strict" : cautionHandling === "tiebreaker" ? "tie_breaker" : cautionHandling;
+      const blockedSources =
+        safetyPolicy === "blocked-bathy-only"
+          ? ["bathy"]
+          : safetyPolicy === "strict"
+            ? ["bathy", "unet_blocked", "unet_caution"]
+            : ["bathy", "unet_blocked"];
+      const response = await planLatestRoute({
+        date: latestDate,
+        hour: 12,
+        progress_id: progressId,
+        start: { lat: startLatNum, lon: startLonNum },
+        goal: { lat: goalLatNum, lon: goalLonNum },
+        policy: {
+          objective: "shortest_distance_under_safety",
+          blocked_sources: blockedSources,
+          caution_mode: cautionMode,
+          corridor_bias: corridorBias[0] / 100,
+          smoothing: true,
+          planner: plannerMode,
+        },
+      });
+      stopLatestProgressPolling();
+      setLatestProgress((prev) => ({
+        ...prev,
+        progressId,
+        status: "completed",
+        phase: "done",
+        message: "最新预测完成",
+        percent: 100,
+        error: "",
+        visible: true,
+      }));
+      setRouteResult(response);
+      if (response.latest_meta && Object.keys(response.latest_meta).length > 0) {
+        setLatestMeta(response.latest_meta);
+      }
+      const usedTimestamp = response.resolved?.used_timestamp;
+      if (usedTimestamp) {
+        const uiTs = normalizedTsToUi(usedTimestamp);
+        setTimestamp(uiTs);
+        setTimestampOptions((prev) => (prev.includes(uiTs) ? prev : [uiTs, ...prev]));
+        await refreshLayerAvailability(uiTs);
+        try {
+          const st = await getLatestStatus(usedTimestamp);
+          if (st.has_latest_meta) {
+            setLatestMeta(st.meta);
+          }
+        } catch {
+          // best-effort status load
+        }
+      }
+      setLayers((prev) => ({
+        ...prev,
+        ice: { ...prev.ice, enabled: true },
+        wave: { ...prev.wave, enabled: true },
+        wind: { ...prev.wind, enabled: true },
+        unetZones: { ...prev.unetZones, enabled: true },
+      }));
+      toast.success(
+        `最新航线已就绪（${response.resolved?.source ?? "未知来源"} -> ${response.resolved?.used_timestamp ?? "无"}）`,
+        { id: "plan-latest-route" }
+      );
+    } catch (error) {
+      stopLatestProgressPolling();
+      setLatestProgress((prev) => ({
+        ...prev,
+        progressId,
+        status: "failed",
+        phase: "error",
+        message: "最新预测失败",
+        error: getErrorMessage(error),
+        visible: true,
+      }));
+      toast.error(`最新预测失败：${getErrorMessage(error)}`, { id: "plan-latest-route" });
+    } finally {
+      setLatestPlanning(false);
+      setPlanning(false);
+    }
+  };
+
+  const handleSaveCopernicusConfig = async () => {
+    try {
+      const res = await setCopernicusConfig({
+        username: copernicusForm.username || undefined,
+        password: copernicusForm.password || undefined,
+        ice_dataset_id: copernicusForm.ice_dataset_id || undefined,
+        wave_dataset_id: copernicusForm.wave_dataset_id || undefined,
+        wind_dataset_id: copernicusForm.wind_dataset_id || undefined,
+      });
+      setCopernicusConfigured(res.configured);
+      toast.success(res.configured ? "Copernicus 配置已就绪" : "Copernicus 配置已保存（信息不完整）");
+      setCopernicusForm((prev) => ({ ...prev, password: "" }));
+    } catch (error) {
+      toast.error(`保存 Copernicus 配置失败: ${getErrorMessage(error)}`);
     }
   };
 
@@ -271,7 +517,7 @@ export default function MapWorkspace() {
       const res = await runInference({ timestamp, model_version: "unet_v1" });
       setInferResult(res);
       await refreshLayerAvailability(timestamp);
-      toast.success(`${t("toast.inferDone")} (${res.stats.cache_hit ? "cache hit" : "fresh run"})`, { id: "run-infer" });
+      toast.success(`${t("toast.inferDone")} (${res.stats.cache_hit ? "命中缓存" : "实时推理"})`, { id: "run-infer" });
     } catch (error) {
       toast.error(`${t("toast.inferFailed")}: ${getErrorMessage(error)}`, { id: "run-infer" });
     } finally {
@@ -294,17 +540,17 @@ export default function MapWorkspace() {
       setStartLat(lat.toFixed(4));
       setStartLon(lon.toFixed(4));
       setPickTarget(null);
-      toast.success(`${t("workspace.startPoint")}: ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
+      toast.success(`${t("workspace.startPoint")}：北纬 ${lat.toFixed(4)}°，东经 ${lon.toFixed(4)}°`);
       return;
     }
     if (pickTarget === "goal") {
       setGoalLat(lat.toFixed(4));
       setGoalLon(lon.toFixed(4));
       setPickTarget(null);
-      toast.success(`${t("workspace.goalPoint")}: ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
+      toast.success(`${t("workspace.goalPoint")}：北纬 ${lat.toFixed(4)}°，东经 ${lon.toFixed(4)}°`);
       return;
     }
-    toast.success(`${t("toast.mapClicked")} ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
+    toast.success(`${t("toast.mapClicked")} 北纬 ${lat.toFixed(4)}°，东经 ${lon.toFixed(4)}°`);
   };
 
   const plannedCoords = routeResult?.route_geojson?.geometry?.coordinates ?? [];
@@ -315,24 +561,25 @@ export default function MapWorkspace() {
   const useDesktopLayout = layoutMode === "desktop" || (layoutMode === "auto" && isWideViewport);
 
   const pageStyle: CSSProperties = {
-    minHeight: 0,
+    minHeight: "100%",
+    height: "100%",
     overflow: useDesktopLayout ? "hidden" : "auto",
   };
   const shellStyle: CSSProperties = {
     display: "flex",
     flexDirection: useDesktopLayout ? "row" : "column",
     minHeight: "100%",
-    height: "auto",
+    height: useDesktopLayout ? "100%" : "auto",
   };
   const leftPaneStyle: CSSProperties = useDesktopLayout
     ? { width: 320, maxHeight: "none", minHeight: 0, borderBottomWidth: 0, borderRightWidth: 1 }
-    : { width: "100%", maxHeight: "46vh", borderBottomWidth: 1, borderRightWidth: 0 };
+    : { width: "100%", maxHeight: "50vh", borderBottomWidth: 1, borderRightWidth: 0 };
   const mapPaneStyle: CSSProperties = useDesktopLayout
-    ? { minHeight: "70vh", height: "70vh", flex: 1 }
+    ? { minHeight: 520, height: "100%", flex: 1, width: 0 }
     : { minHeight: "56vh", height: "56vh", width: "100%", flex: "0 0 auto" };
   const rightPaneStyle: CSSProperties = useDesktopLayout
     ? { width: 360, maxHeight: "none", minHeight: 0, borderTopWidth: 0, borderLeftWidth: 1 }
-    : { width: "100%", maxHeight: "42vh", borderTopWidth: 1, borderLeftWidth: 0 };
+    : { width: "100%", maxHeight: "44vh", borderTopWidth: 1, borderLeftWidth: 0 };
   const floatingLegendStyle: CSSProperties = {
     position: "absolute",
     bottom: useDesktopLayout ? 16 : 8,
@@ -343,8 +590,8 @@ export default function MapWorkspace() {
 
   return (
     <div className="relative h-full overflow-auto bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
-      <div className="absolute right-3 top-3 z-20 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-md backdrop-blur-sm">
-        <div className="mb-1 text-[11px] text-slate-600">Layout</div>
+      <div className="absolute right-3 top-3 z-50 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-md backdrop-blur-sm">
+        <div className="mb-1 text-[11px] text-slate-600">布局</div>
         <div className="flex gap-1">
           <Button
             type="button"
@@ -352,7 +599,7 @@ export default function MapWorkspace() {
             variant={layoutMode === "auto" ? "default" : "outline"}
             onClick={() => setLayoutMode("auto")}
           >
-            Auto
+            自动
           </Button>
           <Button
             type="button"
@@ -360,7 +607,7 @@ export default function MapWorkspace() {
             variant={layoutMode === "desktop" ? "default" : "outline"}
             onClick={() => setLayoutMode("desktop")}
           >
-            Desktop
+            桌面
           </Button>
           <Button
             type="button"
@@ -368,7 +615,7 @@ export default function MapWorkspace() {
             variant={layoutMode === "mobile" ? "default" : "outline"}
             onClick={() => setLayoutMode("mobile")}
           >
-            Mobile
+            移动
           </Button>
         </div>
       </div>
@@ -383,10 +630,24 @@ export default function MapWorkspace() {
               </h3>
               <div className="space-y-3">
                 <div className="space-y-2">
+                  <Label>布局模式</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" variant={layoutMode === "auto" ? "default" : "outline"} onClick={() => setLayoutMode("auto")}>
+                      自动
+                    </Button>
+                    <Button type="button" size="sm" variant={layoutMode === "desktop" ? "default" : "outline"} onClick={() => setLayoutMode("desktop")}>
+                      桌面
+                    </Button>
+                    <Button type="button" size="sm" variant={layoutMode === "mobile" ? "default" : "outline"} onClick={() => setLayoutMode("mobile")}>
+                      移动
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="timestamp">{t("scenario.timestamp")}</Label>
                   <Select value={timestamp} onValueChange={setTimestamp} disabled={!timestampOptions.length}>
                     <SelectTrigger id="timestamp" className="w-full">
-                      <SelectValue placeholder={timestampOptions.length ? "" : "Loading..."} />
+                      <SelectValue placeholder={timestampOptions.length ? "" : "加载中..."} />
                     </SelectTrigger>
                     <SelectContent>
                       {timestampOptions.slice(0, 200).map((ts) => (
@@ -426,42 +687,42 @@ export default function MapWorkspace() {
               <Card className="border-indigo-200">
                 <CardContent className="p-3">
                   <LayerToggle
-                    name={`${t("workspace.layer.bathymetry")} ${availability.bathy ? "" : "(missing)"}`}
+                    name={`${t("workspace.layer.bathymetry")} ${availability.bathy ? "" : "（缺失）"}`}
                     enabled={layers.bathymetry.enabled}
                     opacity={layers.bathymetry.opacity}
                     onToggle={(enabled) => handleLayerToggle("bathymetry", enabled)}
                     onOpacityChange={(opacity) => handleOpacityChange("bathymetry", opacity)}
                   />
                   <LayerToggle
-                    name={`${t("workspace.layer.ais")} ${availability.ais_heatmap ? "" : "(missing)"}`}
+                    name={`${t("workspace.layer.ais")} ${availability.ais_heatmap ? "" : "（缺失）"}`}
                     enabled={layers.aisHeatmap.enabled}
                     opacity={layers.aisHeatmap.opacity}
                     onToggle={(enabled) => handleLayerToggle("aisHeatmap", enabled)}
                     onOpacityChange={(opacity) => handleOpacityChange("aisHeatmap", opacity)}
                   />
                   <LayerToggle
-                    name={`${t("workspace.layer.unet")} ${availability.unet_pred ? "" : "(missing)"}`}
+                    name={`${t("workspace.layer.unet")} ${availability.unet_pred ? "" : "（缺失）"}`}
                     enabled={layers.unetZones.enabled}
                     opacity={layers.unetZones.opacity}
                     onToggle={(enabled) => handleLayerToggle("unetZones", enabled)}
                     onOpacityChange={(opacity) => handleOpacityChange("unetZones", opacity)}
                   />
                   <LayerToggle
-                    name={`${t("workspace.layer.ice")} ${availability.ice ? "" : "(missing)"}`}
+                    name={`${t("workspace.layer.ice")} ${availability.ice ? "" : "（缺失）"}`}
                     enabled={layers.ice.enabled}
                     opacity={layers.ice.opacity}
                     onToggle={(enabled) => handleLayerToggle("ice", enabled)}
                     onOpacityChange={(opacity) => handleOpacityChange("ice", opacity)}
                   />
                   <LayerToggle
-                    name={`${t("workspace.layer.wave")} ${availability.wave ? "" : "(missing)"}`}
+                    name={`${t("workspace.layer.wave")} ${availability.wave ? "" : "（缺失）"}`}
                     enabled={layers.wave.enabled}
                     opacity={layers.wave.opacity}
                     onToggle={(enabled) => handleLayerToggle("wave", enabled)}
                     onOpacityChange={(opacity) => handleOpacityChange("wave", opacity)}
                   />
                   <LayerToggle
-                    name={`${t("workspace.layer.wind")} ${availability.wind ? "" : "(missing)"}`}
+                    name={`${t("workspace.layer.wind")} ${availability.wind ? "" : "（缺失）"}`}
                     enabled={layers.wind.enabled}
                     opacity={layers.wind.opacity}
                     onToggle={(enabled) => handleLayerToggle("wind", enabled)}
@@ -524,10 +785,95 @@ export default function MapWorkspace() {
                     </div>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label>规划算法</Label>
+                    <Select value={plannerMode} onValueChange={setPlannerMode}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="astar">A*（基线）</SelectItem>
+                        <SelectItem value="dstar_lite">D* Lite（静态环境）</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <Button onClick={handlePlanRoute} className="w-full gap-2 bg-green-600 hover:bg-green-700" size="lg" disabled={planning}>
                     <Navigation className="size-4" />
                     {planning ? t("workspace.planRoute.loading") : t("workspace.planRoute")}
                   </Button>
+                  <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
+                    <Label htmlFor="latest-date">最新预报日期</Label>
+                    <input
+                      id="latest-date"
+                      type="date"
+                      value={latestDate}
+                      onChange={(e) => setLatestDate(e.target.value)}
+                      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                    />
+                    <Button onClick={handlePlanLatestRoute} variant="outline" className="w-full">
+                      拉取最新数据并规划
+                    </Button>
+                    {(latestPlanning || latestProgress.visible) && latestProgress.progressId ? (
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] text-slate-600">
+                          <span>{latestPhaseText}</span>
+                          <span>{Math.max(0, Math.min(100, Math.round(latestProgress.percent)))}%</span>
+                        </div>
+                        <Progress value={Math.max(0, Math.min(100, latestProgress.percent))} />
+                        <div className="text-[11px] text-slate-700">{latestProgress.message || "进行中..."}</div>
+                        {latestProgress.error ? (
+                          <div className="text-[11px] text-red-600">{latestProgress.error}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Copernicus 账户</Label>
+                      <span className={`text-xs ${copernicusConfigured ? "text-green-600" : "text-amber-600"}`}>
+                        {copernicusConfigured ? "已配置" : "未就绪"}
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="账号"
+                      value={copernicusForm.username}
+                      onChange={(e) => setCopernicusForm((prev) => ({ ...prev, username: e.target.value }))}
+                      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                    />
+                    <input
+                      type="password"
+                      placeholder="密码"
+                      value={copernicusForm.password}
+                      onChange={(e) => setCopernicusForm((prev) => ({ ...prev, password: e.target.value }))}
+                      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="海冰数据集 ID"
+                      value={copernicusForm.ice_dataset_id}
+                      onChange={(e) => setCopernicusForm((prev) => ({ ...prev, ice_dataset_id: e.target.value }))}
+                      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="海浪数据集 ID"
+                      value={copernicusForm.wave_dataset_id}
+                      onChange={(e) => setCopernicusForm((prev) => ({ ...prev, wave_dataset_id: e.target.value }))}
+                      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="风场数据集 ID"
+                      value={copernicusForm.wind_dataset_id}
+                      onChange={(e) => setCopernicusForm((prev) => ({ ...prev, wind_dataset_id: e.target.value }))}
+                      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                    />
+                    <Button onClick={handleSaveCopernicusConfig} variant="outline" className="w-full">
+                      保存 Copernicus 配置
+                    </Button>
+                  </div>
                   <Button
                     onClick={handleRunInference}
                     variant="outline"
@@ -541,9 +887,9 @@ export default function MapWorkspace() {
                   {inferResult ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
                       <div className="font-medium mb-1">{t("workspace.infer.latest")}</div>
-                      <div>safe: {(inferResult.stats.class_ratio.safe * 100).toFixed(1)}%</div>
-                      <div>caution: {(inferResult.stats.class_ratio.caution * 100).toFixed(1)}%</div>
-                      <div>blocked: {(inferResult.stats.class_ratio.blocked * 100).toFixed(1)}%</div>
+                      <div>安全：{(inferResult.stats.class_ratio.safe * 100).toFixed(1)}%</div>
+                      <div>谨慎：{(inferResult.stats.class_ratio.caution * 100).toFixed(1)}%</div>
+                      <div>禁行：{(inferResult.stats.class_ratio.blocked * 100).toFixed(1)}%</div>
                     </div>
                   ) : null}
                 </CardContent>
@@ -571,16 +917,16 @@ export default function MapWorkspace() {
 
         <div style={floatingLegendStyle}>
           <LegendCard
-              title="Active Layers"
+              title="当前图层"
             items={[
               ...(layers.unetZones.enabled
                 ? [
-                    { color: "#10b981", label: "SAFE" },
-                    { color: "#f59e0b", label: "CAUTION" },
-                    { color: "#ef4444", label: "BLOCKED" },
+                    { color: "#10b981", label: "安全" },
+                    { color: "#f59e0b", label: "谨慎" },
+                    { color: "#ef4444", label: "禁行" },
                   ]
                 : []),
-              ...(layers.aisHeatmap.enabled ? [{ color: "#3b82f6", label: "AIS Traffic" }] : []),
+              ...(layers.aisHeatmap.enabled ? [{ color: "#3b82f6", label: "AIS 航道热力" }] : []),
             ]}
           />
         </div>
@@ -614,6 +960,18 @@ export default function MapWorkspace() {
                       {t("workspace.openGallery")} ({routeResult.gallery_id})
                     </Button>
                   ) : null}
+                  {latestMeta ? (
+                    <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-slate-700 space-y-1">
+                      <div className="font-medium text-sky-900">最新网格来源</div>
+                      <div>来源：{String(latestMeta.source ?? "无")}</div>
+                      <div>请求时间：{String(latestMeta.requested_timestamp ?? "无")}</div>
+                      <div>落盘时间：{String(latestMeta.materialized_at ?? "无")}</div>
+                      <div className="text-sky-800 font-medium pt-1">实时图层统计</div>
+                      <div>海冰浓度：{String((latestMeta as any)?.stats?.ice_conc ? JSON.stringify((latestMeta as any).stats.ice_conc) : "无")}</div>
+                      <div>浪高：{String((latestMeta as any)?.stats?.wave_hs ? JSON.stringify((latestMeta as any).stats.wave_hs) : "无")}</div>
+                      <div>风场 u10/v10：{String((latestMeta as any)?.stats?.wind_u10 && (latestMeta as any)?.stats?.wind_v10 ? `${JSON.stringify((latestMeta as any).stats.wind_u10)} / ${JSON.stringify((latestMeta as any).stats.wind_v10)}` : "无")}</div>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="p-8 text-center border-2 border-dashed border-border rounded-lg">
@@ -629,11 +987,11 @@ export default function MapWorkspace() {
                 <Card>
                   <CardContent className="pt-4 space-y-2 text-sm">
                     <div className="flex gap-2">
-                      <div className="text-green-600 mt-0.5">OK</div>
+                      <div className="text-green-600 mt-0.5">通过</div>
                       <div>{t("explain.reason1")}</div>
                     </div>
                     <div className="flex gap-2">
-                      <div className="text-green-600 mt-0.5">OK</div>
+                      <div className="text-green-600 mt-0.5">通过</div>
                       <div>{t("explain.reason2")}</div>
                     </div>
                     <div className="flex gap-2">
@@ -661,3 +1019,4 @@ export default function MapWorkspace() {
     </div>
   );
 }
+

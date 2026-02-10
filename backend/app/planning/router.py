@@ -149,6 +149,180 @@ def _load_ais_heatmap(settings: Settings, timestamp: str, shape: tuple[int, int]
     return np.zeros(shape, dtype=np.float32)
 
 
+def _transition_cost(
+    *,
+    from_rc: tuple[int, int],
+    to_rc: tuple[int, int],
+    geo,
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    caution_penalty: float,
+    corridor_reward: float,
+) -> float:
+    fr, fc = from_rc
+    tr, tc = to_rc
+    lat0, lon0 = geo.rc_to_latlon(fr, fc)
+    lat1, lon1 = geo.rc_to_latlon(tr, tc)
+    step_km = haversine_km(lat0, lon0, lat1, lon1)
+    mult = 1.0
+    if caution[tr, tc]:
+        mult += caution_penalty
+    mult -= corridor_reward * float(ais_norm[tr, tc])
+    mult = max(0.15, mult)
+    return step_km * mult
+
+
+def _run_astar(
+    *,
+    geo,
+    blocked: np.ndarray,
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    km_per_row: float,
+    km_per_col_min: float,
+    caution_penalty: float,
+    corridor_reward: float,
+) -> list[tuple[int, int]]:
+    h, w = blocked.shape
+    gscore = np.full((h, w), np.inf, dtype=np.float64)
+    closed = np.zeros((h, w), dtype=bool)
+    came_from: dict[tuple[int, int], tuple[int, int]] = {}
+
+    sr, sc = start
+    gr, gc = goal
+    gscore[sr, sc] = 0.0
+    heap: list[tuple[float, float, int, int]] = []
+    heapq.heappush(
+        heap,
+        (
+            _heuristic_km(sr, sc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min),
+            0.0,
+            sr,
+            sc,
+        ),
+    )
+
+    while heap:
+        _, cur_g, r, c = heapq.heappop(heap)
+        if closed[r, c]:
+            continue
+        closed[r, c] = True
+        if (r, c) == (gr, gc):
+            break
+
+        for rr, cc in _neighbors(r, c, h, w):
+            if closed[rr, cc] or blocked[rr, cc]:
+                continue
+            cand = cur_g + _transition_cost(
+                from_rc=(r, c),
+                to_rc=(rr, cc),
+                geo=geo,
+                caution=caution,
+                ais_norm=ais_norm,
+                caution_penalty=caution_penalty,
+                corridor_reward=corridor_reward,
+            )
+            if cand < gscore[rr, cc]:
+                gscore[rr, cc] = cand
+                came_from[(rr, cc)] = (r, c)
+                hval = _heuristic_km(rr, cc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min)
+                heapq.heappush(heap, (cand + hval, cand, rr, cc))
+
+    if not np.isfinite(gscore[gr, gc]):
+        raise PlanningError("No feasible route found under current blocked constraints.")
+    return _reconstruct_path(came_from, (gr, gc))
+
+
+def _run_dstar_lite_static(
+    *,
+    geo,
+    blocked: np.ndarray,
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    caution_penalty: float,
+    corridor_reward: float,
+) -> list[tuple[int, int]]:
+    """
+    Static-grid D* Lite style (backward potential field).
+    In this static setting it computes a reusable cost-to-go map from goal, then
+    greedily extracts a shortest path from start.
+    """
+    h, w = blocked.shape
+    gr, gc = goal
+    sr, sc = start
+
+    g_to_goal = np.full((h, w), np.inf, dtype=np.float64)
+    g_to_goal[gr, gc] = 0.0
+    heap: list[tuple[float, int, int]] = [(0.0, gr, gc)]
+
+    while heap:
+        dist_u, r, c = heapq.heappop(heap)
+        if dist_u > g_to_goal[r, c]:
+            continue
+        for pr, pc in _neighbors(r, c, h, w):
+            if blocked[pr, pc]:
+                continue
+            # Backward relaxation uses forward transition cost predecessor->current.
+            cand = dist_u + _transition_cost(
+                from_rc=(pr, pc),
+                to_rc=(r, c),
+                geo=geo,
+                caution=caution,
+                ais_norm=ais_norm,
+                caution_penalty=caution_penalty,
+                corridor_reward=corridor_reward,
+            )
+            if cand < g_to_goal[pr, pc]:
+                g_to_goal[pr, pc] = cand
+                heapq.heappush(heap, (cand, pr, pc))
+
+    if not np.isfinite(g_to_goal[sr, sc]):
+        raise PlanningError("No feasible route found under current blocked constraints.")
+
+    cells = [(sr, sc)]
+    visited = {cells[0]}
+    cur = (sr, sc)
+    max_steps = h * w
+    for _ in range(max_steps):
+        if cur == (gr, gc):
+            return cells
+        r, c = cur
+        best_next = None
+        best_cost = np.inf
+        for rr, cc in _neighbors(r, c, h, w):
+            if blocked[rr, cc]:
+                continue
+            tail = g_to_goal[rr, cc]
+            if not np.isfinite(tail):
+                continue
+            cand = _transition_cost(
+                from_rc=cur,
+                to_rc=(rr, cc),
+                geo=geo,
+                caution=caution,
+                ais_norm=ais_norm,
+                caution_penalty=caution_penalty,
+                corridor_reward=corridor_reward,
+            ) + tail
+            if cand < best_cost:
+                best_cost = cand
+                best_next = (rr, cc)
+        if best_next is None:
+            break
+        if best_next in visited:
+            # Guard against local loops from numeric ties.
+            raise PlanningError("Planner entered a loop while extracting path.")
+        cells.append(best_next)
+        visited.add(best_next)
+        cur = best_next
+
+    raise PlanningError("No feasible route found under current blocked constraints.")
+
+
 def plan_grid_route(
     *,
     settings: Settings,
@@ -160,6 +334,7 @@ def plan_grid_route(
     caution_mode: str,
     smoothing: bool,
     blocked_sources: list[str],
+    planner: str = "astar",
 ) -> PlanResult:
     valid_caution_modes = {"tie_breaker", "budget", "minimize", "strict"}
     if caution_mode not in valid_caution_modes:
@@ -240,54 +415,36 @@ def plan_grid_route(
         corridor_reward_scale = 0.0
     corridor_reward = max(0.0, float(corridor_bias)) * corridor_reward_scale
 
-    gscore = np.full((h, w), np.inf, dtype=np.float64)
-    closed = np.zeros((h, w), dtype=bool)
-    came_from: dict[tuple[int, int], tuple[int, int]] = {}
-
     sr, sc = s_rc_adj
     gr, gc = g_rc_adj
-    gscore[sr, sc] = 0.0
-    heap: list[tuple[float, float, int, int]] = []
-    heapq.heappush(
-        heap,
-        (
-            _heuristic_km(sr, sc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min),
-            0.0,
-            sr,
-            sc,
-        ),
-    )
+    planner_key = planner.strip().lower()
+    if planner_key in {"astar", "a_star"}:
+        cells = _run_astar(
+            geo=geo,
+            blocked=blocked,
+            caution=caution,
+            ais_norm=ais_norm,
+            start=(sr, sc),
+            goal=(gr, gc),
+            km_per_row=km_per_row,
+            km_per_col_min=km_per_col_min,
+            caution_penalty=caution_penalty,
+            corridor_reward=corridor_reward,
+        )
+    elif planner_key in {"dstar_lite", "dstar-lite", "dstar"}:
+        cells = _run_dstar_lite_static(
+            geo=geo,
+            blocked=blocked,
+            caution=caution,
+            ais_norm=ais_norm,
+            start=(sr, sc),
+            goal=(gr, gc),
+            caution_penalty=caution_penalty,
+            corridor_reward=corridor_reward,
+        )
+    else:
+        raise PlanningError(f"Unsupported planner={planner}, expected astar or dstar_lite")
 
-    while heap:
-        _, cur_g, r, c = heapq.heappop(heap)
-        if closed[r, c]:
-            continue
-        closed[r, c] = True
-        if (r, c) == (gr, gc):
-            break
-
-        lat0, lon0 = geo.rc_to_latlon(r, c)
-        for rr, cc in _neighbors(r, c, h, w):
-            if closed[rr, cc] or blocked[rr, cc]:
-                continue
-            lat1, lon1 = geo.rc_to_latlon(rr, cc)
-            step_km = haversine_km(lat0, lon0, lat1, lon1)
-            mult = 1.0
-            if caution[rr, cc]:
-                mult += caution_penalty
-            mult -= corridor_reward * float(ais_norm[rr, cc])
-            mult = max(0.15, mult)
-            cand = cur_g + step_km * mult
-            if cand < gscore[rr, cc]:
-                gscore[rr, cc] = cand
-                came_from[(rr, cc)] = (r, c)
-                hval = _heuristic_km(rr, cc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min)
-                heapq.heappush(heap, (cand + hval, cand, rr, cc))
-
-    if not np.isfinite(gscore[gr, gc]):
-        raise PlanningError("No feasible route found under current blocked constraints.")
-
-    cells = _reconstruct_path(came_from, (gr, gc))
     raw_cells = cells[:]
     if smoothing:
         cells = _smooth_cells_los(cells, blocked)
@@ -323,6 +480,7 @@ def plan_grid_route(
         "start_adjusted": s_rc_adj != s_rc,
         "goal_adjusted": g_rc_adj != g_rc,
         "blocked_ratio": round(float(blocked.mean()), 4),
+        "planner": planner_key,
         "grid_bounds": {
             "lat_min": bounds.lat_min,
             "lat_max": bounds.lat_max,

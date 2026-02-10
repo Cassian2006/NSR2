@@ -31,6 +31,7 @@ def plan_route(payload: RoutePlanRequest) -> dict:
             caution_mode=payload.policy.caution_mode,
             smoothing=payload.policy.smoothing,
             blocked_sources=payload.policy.blocked_sources,
+            planner=payload.policy.planner,
         )
     except PlanningError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

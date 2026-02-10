@@ -10,6 +10,7 @@ from app.api.routes_eval import router as eval_router
 from app.api.routes_gallery import router as gallery_router
 from app.api.routes_infer import router as infer_router
 from app.api.routes_layers import router as layers_router
+from app.api.routes_latest import router as latest_router
 from app.api.routes_plan import router as plan_router
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(layers_router, prefix="/v1")
     app.include_router(infer_router, prefix="/v1")
     app.include_router(plan_router, prefix="/v1")
+    app.include_router(latest_router, prefix="/v1")
     app.include_router(gallery_router, prefix="/v1")
     app.include_router(eval_router, prefix="/v1")
 

@@ -17,6 +17,7 @@ class PlanPolicy(BaseModel):
     caution_mode: str = "tie_breaker"
     corridor_bias: float = 0.2
     smoothing: bool = True
+    planner: str = "astar"
 
 
 class RoutePlanRequest(BaseModel):
@@ -24,6 +25,29 @@ class RoutePlanRequest(BaseModel):
     start: Coord
     goal: Coord
     policy: PlanPolicy = Field(default_factory=PlanPolicy)
+
+
+class LatestPlanRequest(BaseModel):
+    date: str
+    hour: int = 12
+    force_refresh: bool = False
+    progress_id: str | None = None
+    start: Coord
+    goal: Coord
+    policy: PlanPolicy = Field(default_factory=PlanPolicy)
+
+
+class CopernicusConfigRequest(BaseModel):
+    username: str | None = None
+    password: str | None = None
+    ice_dataset_id: str | None = None
+    wave_dataset_id: str | None = None
+    wind_dataset_id: str | None = None
+    ice_var: str | None = None
+    ice_thick_var: str | None = None
+    wave_var: str | None = None
+    wind_u_var: str | None = None
+    wind_v_var: str | None = None
 
 
 class InferRequest(BaseModel):
@@ -43,4 +67,3 @@ class GalleryRecord(BaseModel):
     corridor_bias: float
     model_version: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
-

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -155,7 +155,7 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
       <div className="pointer-events-none absolute bottom-4 left-4 rounded-lg bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
         <div className="text-xs text-muted-foreground">{t("workspace.mousePosition")}</div>
         <div className="text-sm font-mono">
-          {mousePos.lat.toFixed(3)} degN, {mousePos.lon.toFixed(3)} degE
+          北纬 {mousePos.lat.toFixed(3)}°, 东经 {mousePos.lon.toFixed(3)}°
         </div>
       </div>
     </div>
