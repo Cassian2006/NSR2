@@ -101,6 +101,12 @@ def test_route_plan_and_gallery(client: TestClient) -> None:
     gallery_resp = client.get("/v1/gallery/list")
     assert gallery_resp.status_code == 200
     assert isinstance(gallery_resp.json().get("items", []), list)
+    item_resp = client.get(f"/v1/gallery/{plan['gallery_id']}")
+    assert item_resp.status_code == 200
+    item = item_resp.json()
+    assert item.get("action", {}).get("type") == "route_plan"
+    assert item.get("result", {}).get("status") == "success"
+    assert isinstance(item.get("timeline", []), list)
 
     image_resp = client.get(f"/v1/gallery/{plan['gallery_id']}/image.png")
     assert image_resp.status_code == 200

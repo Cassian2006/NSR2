@@ -17,6 +17,7 @@ import { useLanguage } from "../contexts/LanguageContext";
 import StatCard from "../components/StatCard";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../components/ui/hover-card";
 import { Separator } from "../components/ui/separator";
 
 function downloadJsonFile(filename: string, payload: unknown) {
@@ -115,6 +116,20 @@ export default function ExportReport() {
 
   const imageUrl = selectedItem ? getGalleryImageUrl(selectedItem.id) : "";
 
+  const getActionSummary = (item: GalleryItem) => {
+    const st = item.action?.start_input ?? item.start;
+    const gl = item.action?.goal_input ?? item.goal;
+    return `${Number(st?.lat ?? 0).toFixed(2)}, ${Number(st?.lon ?? 0).toFixed(2)} -> ${Number(gl?.lat ?? 0).toFixed(2)}, ${Number(gl?.lon ?? 0).toFixed(2)}`;
+  };
+
+  const getResultSummary = (item: GalleryItem) => {
+    const r = item.result;
+    const distance = Number(r?.distance_km ?? item.distance_km ?? 0).toFixed(1);
+    const caution = Number(r?.caution_len_km ?? item.caution_len_km ?? 0).toFixed(1);
+    const status = String(r?.status ?? "success");
+    return `${status} | ${distance} km | caution ${caution} km`;
+  };
+
   const handleDelete = async () => {
     if (!selectedItem) return;
     const ok = window.confirm(`Delete gallery item ${selectedItem.id}?`);
@@ -194,18 +209,41 @@ export default function ExportReport() {
                 items.map((item) => {
                   const active = item.id === selectedId;
                   return (
-                    <button
-                      key={item.id}
-                      onClick={() => setSelectedId(item.id)}
-                      className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                        active ? "border-blue-500 bg-blue-50" : "border-border bg-white hover:bg-muted/40"
-                      }`}
-                    >
-                      <div className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</div>
-                      <div className="font-mono text-sm">{item.id}</div>
-                      <div className="text-sm">{item.timestamp}</div>
-                      <div className="text-xs text-muted-foreground">distance: {Number(item.distance_km ?? 0).toFixed(1)} km</div>
-                    </button>
+                    <HoverCard key={item.id} openDelay={180} closeDelay={80}>
+                      <HoverCardTrigger asChild>
+                        <button
+                          onClick={() => setSelectedId(item.id)}
+                          className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                            active ? "border-blue-500 bg-blue-50" : "border-border bg-white hover:bg-muted/40"
+                          }`}
+                        >
+                          <div className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</div>
+                          <div className="font-mono text-sm">{item.id}</div>
+                          <div className="text-sm">{item.timestamp}</div>
+                          <div className="text-xs text-muted-foreground">action: {getActionSummary(item)}</div>
+                          <div className="text-xs text-muted-foreground">result: {getResultSummary(item)}</div>
+                        </button>
+                      </HoverCardTrigger>
+                      <HoverCardContent className="w-96 space-y-2">
+                        <div className="text-sm font-semibold">Route Plan Detail</div>
+                        <div className="text-xs text-muted-foreground">action</div>
+                        <div className="text-xs font-mono">{getActionSummary(item)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          policy: {String(item.action?.policy?.caution_mode ?? "tie_breaker")} | blocked:{" "}
+                          {Array.isArray(item.action?.policy?.blocked_sources) ? item.action?.policy?.blocked_sources?.join(", ") : "n/a"} | smooth:{" "}
+                          {item.action?.policy?.smoothing ? "true" : "false"} | bias: {Number(item.action?.policy?.corridor_bias ?? item.corridor_bias ?? 0).toFixed(2)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">result</div>
+                        <div className="text-xs">{getResultSummary(item)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          points: {Number(item.result?.raw_points ?? item.explain?.raw_points ?? 0)} {"->"}{" "}
+                          {Number(item.result?.smoothed_points ?? item.explain?.smoothed_points ?? 0)} | adjusted start/goal:{" "}
+                          {item.result?.start_adjusted || item.explain?.start_adjusted ? "Y" : "N"}/
+                          {item.result?.goal_adjusted || item.explain?.goal_adjusted ? "Y" : "N"} | corridor:{" "}
+                          {Number(item.result?.corridor_alignment ?? item.explain?.corridor_alignment ?? 0).toFixed(3)}
+                        </div>
+                      </HoverCardContent>
+                    </HoverCard>
                   );
                 })
               )}
@@ -259,6 +297,24 @@ export default function ExportReport() {
                       <div className="font-mono">
                         {Number(selectedItem.goal?.lat ?? 0).toFixed(4)}, {Number(selectedItem.goal?.lon ?? 0).toFixed(4)}
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border bg-white p-3 text-sm space-y-2">
+                    <div className="text-muted-foreground">Action & Result</div>
+                    <div className="font-mono text-xs">action: {getActionSummary(selectedItem)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      result: {getResultSummary(selectedItem)} | points{" "}
+                      {Number(selectedItem.result?.raw_points ?? selectedItem.explain?.raw_points ?? 0)} {"->"}{" "}
+                      {Number(selectedItem.result?.smoothed_points ?? selectedItem.explain?.smoothed_points ?? 0)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      policy: {String(selectedItem.action?.policy?.caution_mode ?? "tie_breaker")} | blocked:{" "}
+                      {Array.isArray(selectedItem.action?.policy?.blocked_sources)
+                        ? selectedItem.action?.policy?.blocked_sources?.join(", ")
+                        : "n/a"}{" "}
+                      | smooth: {selectedItem.action?.policy?.smoothing ? "true" : "false"} | bias:{" "}
+                      {Number(selectedItem.action?.policy?.corridor_bias ?? selectedItem.corridor_bias ?? 0).toFixed(2)}
                     </div>
                   </div>
 

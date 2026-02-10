@@ -262,3 +262,8 @@
 - 2026-02-10T18:10:25.1707301+00:00 | Added AOI framing rectangle on map in frontend/src/components/MapCanvas.tsx so users can see the NSR data extent over basemap.
 - 2026-02-10T18:10:25.1707301+00:00 | Added regression tests backend/tests/test_render_sampling.py and extended backend/tests/test_geo_mapping.py for metadata latitude normalization behavior.
 - 2026-02-10T18:10:25.1707301+00:00 | Validation: python -m pytest -q (backend) -> 37 passed; npm run build (frontend) succeeded; backend /healthz OK after restart.
+- 2026-02-10T18:13:55.0198695+00:00 | Enhanced gallery record schema in backend/app/api/routes_plan.py: each route run now stores structured `action` (planning input/policy) and `result` (status/metrics/point-count/snap flags) plus `timeline` events.
+- 2026-02-10T18:13:55.0198695+00:00 | Updated frontend gallery types in frontend/src/api/client.ts and upgraded frontend/src/pages/ExportReport.tsx list cards to focus on action+result summaries.
+- 2026-02-10T18:13:55.0198695+00:00 | Added hover-detail panels (HoverCard) on gallery run items to show detailed policy and route-result metrics on mouse-over.
+- 2026-02-10T18:13:55.0198695+00:00 | Added backend API regression assertion in backend/tests/test_api_smoke.py for gallery action/result/timeline fields after route planning.
+- 2026-02-10T18:13:55.0198695+00:00 | Validation: python -m pytest -q (backend) -> 37 passed; npm run build (frontend) succeeded; backend restarted and /healthz returned ok.

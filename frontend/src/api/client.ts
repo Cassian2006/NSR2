@@ -99,6 +99,33 @@ export type GalleryItem = {
     properties: Record<string, unknown>;
   };
   explain?: Record<string, unknown>;
+  action?: {
+    type?: string;
+    timestamp?: string;
+    start_input?: { lat: number; lon: number };
+    goal_input?: { lat: number; lon: number };
+    policy?: {
+      objective?: string;
+      blocked_sources?: string[];
+      caution_mode?: string;
+      corridor_bias?: number;
+      smoothing?: boolean;
+    };
+  };
+  result?: {
+    status?: string;
+    distance_km?: number;
+    distance_nm?: number;
+    caution_len_km?: number;
+    corridor_alignment?: number;
+    route_points?: number;
+    raw_points?: number;
+    smoothed_points?: number;
+    start_adjusted?: boolean;
+    goal_adjusted?: boolean;
+    blocked_ratio?: number;
+  };
+  timeline?: Array<{ event?: string; status?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 };
 
