@@ -435,6 +435,7 @@ export default function MapWorkspace() {
 
       <div className="flex-1 relative">
         <MapCanvas
+          timestamp={timestamp}
           layers={layers}
           showRoute={Boolean(routeResult)}
           onMapClick={handleMapClick}

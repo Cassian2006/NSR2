@@ -1,6 +1,20 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CircleMarker,
+  ImageOverlay,
+  MapContainer,
+  Polyline,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
+import type { LatLngBoundsExpression } from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+import { getApiOrigin } from "../api/client";
 
 interface MapCanvasProps {
+  timestamp: string;
   layers: {
     bathymetry: { enabled: boolean; opacity: number };
     aisHeatmap: { enabled: boolean; opacity: number };
@@ -18,128 +32,138 @@ interface MapCanvasProps {
   onMapClick?: (lat: number, lon: number) => void;
 }
 
-type Bounds = {
-  minLat: number;
-  maxLat: number;
-  minLon: number;
-  maxLon: number;
+type OverlayState = {
+  url: string;
+  bounds: LatLngBoundsExpression;
 };
 
-const BASE_BOUNDS: Bounds = {
-  minLat: 66,
-  maxLat: 86,
-  minLon: -30,
-  maxLon: 180,
-};
+const API_ORIGIN = getApiOrigin();
+const INITIAL_BOUNDS: LatLngBoundsExpression = [
+  [66, -180],
+  [86, 180],
+];
 
-const SVG_W = 1000;
-const SVG_H = 600;
+function OverlayLayer({
+  layerId,
+  enabled,
+  opacity,
+  timestamp,
+  zIndex,
+}: {
+  layerId: string;
+  enabled: boolean;
+  opacity: number;
+  timestamp: string;
+  zIndex: number;
+}) {
+  const map = useMap();
+  const [overlay, setOverlay] = useState<OverlayState | null>(null);
 
-function expandBounds(bounds: Bounds, lat: number, lon: number): Bounds {
-  return {
-    minLat: Math.min(bounds.minLat, lat),
-    maxLat: Math.max(bounds.maxLat, lat),
-    minLon: Math.min(bounds.minLon, lon),
-    maxLon: Math.max(bounds.maxLon, lon),
-  };
-}
-
-function toCanvas(bounds: Bounds, lat: number, lon: number): [number, number] {
-  const lonSpan = Math.max(1e-6, bounds.maxLon - bounds.minLon);
-  const latSpan = Math.max(1e-6, bounds.maxLat - bounds.minLat);
-  const x = ((lon - bounds.minLon) / lonSpan) * SVG_W;
-  const y = SVG_H - ((lat - bounds.minLat) / latSpan) * SVG_H;
-  return [x, y];
-}
-
-export default function MapCanvas({ layers, showRoute, routeGeojson, start, goal, onMapClick }: MapCanvasProps) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const [mousePos, setMousePos] = useState({ lat: 79.234, lon: 45.678, x: 142, y: 67 });
-
-  const routeCoordinates = useMemo(() => routeGeojson?.geometry?.coordinates ?? [], [routeGeojson]);
-
-  const bounds = useMemo(() => {
-    let b = { ...BASE_BOUNDS };
-    if (start) b = expandBounds(b, start.lat, start.lon);
-    if (goal) b = expandBounds(b, goal.lat, goal.lon);
-    routeCoordinates.forEach(([lon, lat]) => {
-      b = expandBounds(b, lat, lon);
+  const refresh = useCallback(() => {
+    if (!enabled || !timestamp) {
+      setOverlay(null);
+      return;
+    }
+    const b = map.getBounds();
+    const size = map.getSize();
+    const width = Math.max(256, Math.round(size.x));
+    const height = Math.max(256, Math.round(size.y));
+    const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(6)).join(",");
+    const url =
+      `${API_ORIGIN}/v1/overlay/${layerId}.png` +
+      `?timestamp=${encodeURIComponent(timestamp)}` +
+      `&bbox=${encodeURIComponent(bbox)}` +
+      `&size=${width},${height}` +
+      `&v=${encodeURIComponent(`${timestamp}-${b.toBBoxString()}-${width}x${height}`)}`;
+    setOverlay({
+      url,
+      bounds: [
+        [b.getSouth(), b.getWest()],
+        [b.getNorth(), b.getEast()],
+      ],
     });
-    const latPad = (b.maxLat - b.minLat) * 0.1;
-    const lonPad = (b.maxLon - b.minLon) * 0.1;
-    return {
-      minLat: b.minLat - latPad,
-      maxLat: b.maxLat + latPad,
-      minLon: b.minLon - lonPad,
-      maxLon: b.maxLon + lonPad,
-    };
-  }, [goal, routeCoordinates, start]);
+  }, [enabled, layerId, map, timestamp]);
 
-  const routePath = useMemo(() => {
-    if (!routeCoordinates.length) return "";
-    const points = routeCoordinates.map(([lon, lat]) => toCanvas(bounds, lat, lon));
-    const [head, ...tail] = points;
-    return `M ${head[0].toFixed(2)} ${head[1].toFixed(2)} ` + tail.map(([x, y]) => `L ${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
-  }, [bounds, routeCoordinates]);
+  useMapEvents({
+    moveend: refresh,
+    zoomend: refresh,
+    resize: refresh,
+  });
 
-  const startPoint = start ? toCanvas(bounds, start.lat, start.lon) : null;
-  const goalPoint = goal ? toCanvas(bounds, goal.lat, goal.lon) : null;
+  // Trigger first load and timestamp/layer changes.
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const lon = bounds.minLon + (x / rect.width) * (bounds.maxLon - bounds.minLon);
-    const lat = bounds.maxLat - (y / rect.height) * (bounds.maxLat - bounds.minLat);
-    const gridX = Math.floor((x / rect.width) * 200);
-    const gridY = Math.floor((y / rect.height) * 100);
-    setMousePos({ lat, lon, x: gridX, y: gridY });
-  };
+  if (!enabled || !overlay) return null;
+  return <ImageOverlay url={overlay.url} bounds={overlay.bounds} opacity={Math.max(0, Math.min(1, opacity / 100))} zIndex={zIndex} />;
+}
 
-  const handleClick = () => {
-    if (onMapClick) onMapClick(mousePos.lat, mousePos.lon);
-  };
+function MapEvents({
+  onMapClick,
+  onMouseMove,
+}: {
+  onMapClick?: (lat: number, lon: number) => void;
+  onMouseMove: (lat: number, lon: number) => void;
+}) {
+  useMapEvents({
+    click: (e) => {
+      if (onMapClick) onMapClick(e.latlng.lat, e.latlng.lng);
+    },
+    mousemove: (e) => onMouseMove(e.latlng.lat, e.latlng.lng),
+  });
+  return null;
+}
+
+export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, start, goal, onMapClick }: MapCanvasProps) {
+  const [mousePos, setMousePos] = useState({ lat: 79.234, lon: 45.678 });
+
+  const routeLatLng = useMemo(() => {
+    const coords = routeGeojson?.geometry?.coordinates ?? [];
+    return coords.map(([lon, lat]) => [lat, lon] as [number, number]);
+  }, [routeGeojson]);
 
   return (
-    <div ref={canvasRef} className="absolute inset-0 bg-gradient-to-br from-slate-100 to-slate-200 cursor-crosshair" onMouseMove={handleMouseMove} onClick={handleClick}>
-      <div
-        className="absolute inset-0 opacity-20"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)
-          `,
-          backgroundSize: "50px 50px",
-        }}
-      />
+    <div className="absolute inset-0">
+      <MapContainer
+        bounds={INITIAL_BOUNDS}
+        className="h-full w-full"
+        zoomSnap={0.25}
+        minZoom={1}
+        maxZoom={8}
+        worldCopyJump={false}
+      >
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="&copy; OpenStreetMap contributors"
+        />
 
-      {layers.bathymetry.enabled && <div className="absolute inset-0 bg-red-500" style={{ opacity: layers.bathymetry.opacity / 400 }} />}
-      {layers.unetZones.enabled && (
-        <div className="absolute inset-0">
-          <div className="absolute top-0 left-0 w-1/3 h-full bg-green-500" style={{ opacity: layers.unetZones.opacity / 300 }} />
-          <div className="absolute top-0 right-0 w-1/3 h-full bg-amber-500" style={{ opacity: layers.unetZones.opacity / 300 }} />
-        </div>
-      )}
-      {layers.aisHeatmap.enabled && (
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-400 via-cyan-400 to-yellow-400" style={{ opacity: layers.aisHeatmap.opacity / 400 }} />
-      )}
-      {layers.ice.enabled && <div className="absolute inset-0 bg-gradient-to-b from-blue-100 to-transparent" style={{ opacity: layers.ice.opacity / 200 }} />}
+        <MapEvents
+          onMapClick={onMapClick}
+          onMouseMove={(lat, lon) => {
+            setMousePos({ lat, lon });
+          }}
+        />
 
-      {showRoute && (
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${SVG_W} ${SVG_H}`} preserveAspectRatio="none">
-          {routePath ? <path d={routePath} stroke="#1e40af" strokeWidth="4" fill="none" strokeLinecap="round" strokeLinejoin="round" /> : null}
-          {startPoint ? <circle cx={startPoint[0]} cy={startPoint[1]} r="8" fill="#10b981" stroke="white" strokeWidth="2" /> : null}
-          {goalPoint ? <circle cx={goalPoint[0]} cy={goalPoint[1]} r="8" fill="#ef4444" stroke="white" strokeWidth="2" /> : null}
-        </svg>
-      )}
+        <OverlayLayer layerId="bathy" enabled={layers.bathymetry.enabled} opacity={layers.bathymetry.opacity} timestamp={timestamp} zIndex={300} />
+        <OverlayLayer layerId="ice" enabled={layers.ice.enabled} opacity={layers.ice.opacity} timestamp={timestamp} zIndex={320} />
+        <OverlayLayer layerId="wave" enabled={layers.wave.enabled} opacity={layers.wave.opacity} timestamp={timestamp} zIndex={330} />
+        <OverlayLayer layerId="wind" enabled={layers.wind.enabled} opacity={layers.wind.opacity} timestamp={timestamp} zIndex={340} />
+        <OverlayLayer layerId="ais_heatmap" enabled={layers.aisHeatmap.enabled} opacity={layers.aisHeatmap.opacity} timestamp={timestamp} zIndex={360} />
+        <OverlayLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} zIndex={380} />
 
-      <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-2 rounded-lg shadow-md pointer-events-none">
+        {showRoute && routeLatLng.length >= 2 ? (
+          <Polyline positions={routeLatLng} pathOptions={{ color: "#1e40af", weight: 4, opacity: 0.95 }} />
+        ) : null}
+        {start ? <CircleMarker center={[start.lat, start.lon]} radius={6} pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#10b981", fillOpacity: 1 }} /> : null}
+        {goal ? <CircleMarker center={[goal.lat, goal.lon]} radius={6} pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#ef4444", fillOpacity: 1 }} /> : null}
+      </MapContainer>
+
+      <div className="pointer-events-none absolute bottom-4 left-4 rounded-lg bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
         <div className="text-xs text-muted-foreground">Mouse Position</div>
         <div className="text-sm font-mono">
           {mousePos.lat.toFixed(3)} degN, {mousePos.lon.toFixed(3)} degE
         </div>
-        <div className="text-xs text-muted-foreground">Grid: [{mousePos.x}, {mousePos.y}]</div>
       </div>
     </div>
   );

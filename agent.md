@@ -181,3 +181,9 @@
 - 2026-02-10T16:06:30.7059513Z | Extended API smoke coverage: backend/tests/test_api_smoke.py now validates /v1/gallery/{id}/image.png returns image/png with non-trivial size (>500 bytes).
 - 2026-02-10T16:06:30.7059513Z | Frontend workflow integration: MapWorkspace adds Open In Gallery action after successful plan; top navigation Export button now routes to /export.
 - 2026-02-10T16:06:30.7059513Z | Validation: npm run build (frontend) succeeded; python -m pytest -q (backend) -> 20 passed, 1 warning.
+- 2026-02-10T16:16:41.7045858Z | Implemented real layer rendering backend: added backend/app/core/render.py with bbox/size parsing, tile bbox conversion, grid sampling, continuous/class colormaps, and RGBA PNG encoding for bathy/ais/unet/ice/wave/wind overlays.
+- 2026-02-10T16:16:41.7045858Z | Replaced placeholder layer endpoints in backend/app/api/routes_layers.py: /v1/overlay and /v1/tiles now render data-driven PNGs with timestamp normalization and request validation.
+- 2026-02-10T16:16:41.7045858Z | Added API smoke coverage for rendered imagery in backend/tests/test_api_smoke.py (overlay and tile return image/png with non-trivial payload).
+- 2026-02-10T16:16:41.7045858Z | Migrated frontend map to real Leaflet integration in frontend/src/components/MapCanvas.tsx with OSM base map, backend overlay image layers, route polyline, start/goal markers, and map click coordinates.
+- 2026-02-10T16:16:41.7045858Z | Updated frontend/src/pages/MapWorkspace.tsx to pass timestamp into MapCanvas for dynamic layer rendering.
+- 2026-02-10T16:16:41.7045858Z | Validation: python -m pytest -q (backend) -> 21 passed, 1 warning; npm run build (frontend) succeeded after adding leaflet/react-leaflet@4.2.1.

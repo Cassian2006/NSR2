@@ -45,6 +45,22 @@ def test_layers(client: TestClient) -> None:
     assert isinstance(heat_item["available"], bool)
 
 
+def test_overlay_and_tile_png(client: TestClient) -> None:
+    ts = _pick_timestamp(client)
+    overlay = client.get(
+        "/v1/overlay/ais_heatmap.png",
+        params={"timestamp": ts, "bbox": "-180,60,180,86", "size": "800,400"},
+    )
+    assert overlay.status_code == 200
+    assert overlay.headers["content-type"] == "image/png"
+    assert len(overlay.content) > 500
+
+    tile = client.get(f"/v1/tiles/ais_heatmap/1/1/0.png", params={"timestamp": ts})
+    assert tile.status_code == 200
+    assert tile.headers["content-type"] == "image/png"
+    assert len(tile.content) > 100
+
+
 def test_route_plan_and_gallery(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     plan_payload = {
