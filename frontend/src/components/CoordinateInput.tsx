@@ -3,7 +3,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
-import { useTranslation } from "react-i18next";
+import { useLanguage } from "../contexts/LanguageContext";
 
 interface CoordinateInputProps {
   label: string;
@@ -22,10 +22,10 @@ export default function CoordinateInput({
   onLonChange,
   onPickFromMap,
 }: CoordinateInputProps) {
-  const { t } = useTranslation();
+  const { t } = useLanguage();
   const handleCopy = () => {
     navigator.clipboard.writeText(`${lat}, ${lon}`);
-    toast.success("Coordinates copied to clipboard");
+    toast.success(t("toast.coordsCopied"));
   };
 
   return (

@@ -3,7 +3,16 @@ import { useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
 
-import { getLayers, getTimestamps, planRoute, runInference, uploadGalleryImage, type InferResponse, type RoutePlanResponse } from "../api/client";
+import {
+  getErrorMessage,
+  getLayers,
+  getTimestamps,
+  planRoute,
+  runInference,
+  uploadGalleryImage,
+  type InferResponse,
+  type RoutePlanResponse,
+} from "../api/client";
 import CoordinateInput from "../components/CoordinateInput";
 import LayerToggle from "../components/LayerToggle";
 import LegendCard from "../components/LegendCard";
@@ -177,13 +186,13 @@ export default function MapWorkspace() {
       });
       const dataUrl = canvas.toDataURL("image/png");
       await uploadGalleryImage(galleryId, dataUrl);
-      toast.success("Gallery screenshot updated", { duration: 1800 });
+      toast.success(t("toast.galleryShotUpdated"), { duration: 1800 });
     } catch (error) {
       // Keep planning success even if screenshot capture fails.
       console.warn("gallery screenshot upload failed", error);
-      toast.warning("Route saved, screenshot kept as backend preview");
+      toast.warning(t("toast.galleryShotFallback"));
     }
-  }, []);
+  }, [t]);
 
   const handlePlanRoute = async () => {
     const startLatNum = Number.parseFloat(startLat);
@@ -191,11 +200,11 @@ export default function MapWorkspace() {
     const goalLatNum = Number.parseFloat(goalLat);
     const goalLonNum = Number.parseFloat(goalLon);
     if ([startLatNum, startLonNum, goalLatNum, goalLonNum].some((v) => Number.isNaN(v))) {
-      toast.error("Invalid coordinates");
+      toast.error(t("toast.invalidCoords"));
       return;
     }
     if (!timestamp) {
-      toast.error("Timestamp is required");
+      toast.error(t("toast.tsRequired"));
       return;
     }
     setPlanning(true);
@@ -224,7 +233,7 @@ export default function MapWorkspace() {
       toast.success(`${t("toast.success")} (Gallery: ${response.gallery_id})`, { id: "plan-route" });
       void captureAndUploadGalleryImage(response.gallery_id);
     } catch (error) {
-      toast.error(`Route planning failed: ${String(error)}`, { id: "plan-route" });
+      toast.error(`${t("toast.planFailed")}: ${getErrorMessage(error)}`, { id: "plan-route" });
     } finally {
       setPlanning(false);
     }
@@ -232,18 +241,18 @@ export default function MapWorkspace() {
 
   const handleRunInference = async () => {
     if (!timestamp) {
-      toast.error("Timestamp is required");
+      toast.error(t("toast.tsRequired"));
       return;
     }
     setInferring(true);
-    toast.loading("Running U-Net inference...", { id: "run-infer" });
+    toast.loading(t("toast.inferRunning"), { id: "run-infer" });
     try {
       const res = await runInference({ timestamp, model_version: "unet_v1" });
       setInferResult(res);
       await refreshLayerAvailability(timestamp);
-      toast.success(`Inference done (${res.stats.cache_hit ? "cache hit" : "fresh run"})`, { id: "run-infer" });
+      toast.success(`${t("toast.inferDone")} (${res.stats.cache_hit ? "cache hit" : "fresh run"})`, { id: "run-infer" });
     } catch (error) {
-      toast.error(`Inference failed: ${String(error)}`, { id: "run-infer" });
+      toast.error(`${t("toast.inferFailed")}: ${getErrorMessage(error)}`, { id: "run-infer" });
     } finally {
       setInferring(false);
     }
@@ -264,14 +273,14 @@ export default function MapWorkspace() {
       setStartLat(lat.toFixed(4));
       setStartLon(lon.toFixed(4));
       setPickTarget(null);
-      toast.success(`Start set to ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
+      toast.success(`${t("workspace.startPoint")}: ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
       return;
     }
     if (pickTarget === "goal") {
       setGoalLat(lat.toFixed(4));
       setGoalLon(lon.toFixed(4));
       setPickTarget(null);
-      toast.success(`Goal set to ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
+      toast.success(`${t("workspace.goalPoint")}: ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
       return;
     }
     toast.success(`${t("toast.mapClicked")} ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
@@ -435,7 +444,7 @@ export default function MapWorkspace() {
 
                   <Button onClick={handlePlanRoute} className="w-full gap-2 bg-green-600 hover:bg-green-700" size="lg" disabled={planning}>
                     <Navigation className="size-4" />
-                    {planning ? "Planning..." : t("workspace.planRoute")}
+                    {planning ? t("workspace.planRoute.loading") : t("workspace.planRoute")}
                   </Button>
                   <Button
                     onClick={handleRunInference}
@@ -445,11 +454,11 @@ export default function MapWorkspace() {
                     disabled={inferring}
                   >
                     <Cpu className="size-4" />
-                    {inferring ? "Inferring..." : "Run U-Net Inference"}
+                    {inferring ? t("workspace.infer.loading") : t("workspace.infer.run")}
                   </Button>
                   {inferResult ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                      <div className="font-medium mb-1">Latest Inference</div>
+                      <div className="font-medium mb-1">{t("workspace.infer.latest")}</div>
                       <div>safe: {(inferResult.stats.class_ratio.safe * 100).toFixed(1)}%</div>
                       <div>caution: {(inferResult.stats.class_ratio.caution * 100).toFixed(1)}%</div>
                       <div>blocked: {(inferResult.stats.class_ratio.blocked * 100).toFixed(1)}%</div>
@@ -474,13 +483,13 @@ export default function MapWorkspace() {
         />
         {pickTarget ? (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-xs text-white">
-            Click map to set {pickTarget === "start" ? "start" : "goal"} point
+            {pickTarget === "start" ? t("workspace.pick.start.hint") : t("workspace.pick.goal.hint")}
           </div>
         ) : null}
 
         <div className="absolute bottom-4 right-4">
           <LegendCard
-            title="Active Layers"
+              title="Active Layers"
             items={[
               ...(layers.unetZones.enabled
                 ? [
@@ -499,61 +508,65 @@ export default function MapWorkspace() {
         <ScrollArea className="flex-1">
           <div className="p-4 space-y-6">
             <div>
-              <h3 className="mb-3">Route Summary</h3>
+              <h3 className="mb-3">{t("summary.title")}</h3>
               {routeResult ? (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
-                    <StatCard label="Distance" value={routeSummary.distanceKm.toFixed(1)} unit="km" />
-                    <StatCard label="Distance" value={routeSummary.distanceNm.toFixed(1)} unit="nm" />
+                    <StatCard label={t("summary.distance")} value={routeSummary.distanceKm.toFixed(1)} unit="km" />
+                    <StatCard label={t("summary.distance")} value={routeSummary.distanceNm.toFixed(1)} unit="nm" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <StatCard label="% in SAFE" value={routeSummary.safePct} unit="%" variant="success" />
-                    <StatCard label="% in CAUTION" value={routeSummary.cautionPct} unit="%" variant="warning" />
+                    <StatCard label={t("summary.safe")} value={routeSummary.safePct} unit="%" variant="success" />
+                    <StatCard label={t("summary.caution")} value={routeSummary.cautionPct} unit="%" variant="warning" />
                   </div>
-                  <StatCard label="Corridor Alignment" value={routeSummary.alignment.toFixed(2)} variant="success" />
+                  <StatCard label={t("summary.alignment")} value={routeSummary.alignment.toFixed(2)} variant="success" />
                   <div className="p-3 rounded-lg border border-green-200 bg-green-50 flex items-start gap-2">
                     <CheckCircle2 className="size-4 text-green-600 mt-0.5 flex-shrink-0" />
                     <div className="text-sm text-green-800">
-                      <div className="font-medium mb-1">No Safety Violations</div>
-                      <div className="text-xs">Route avoids all BLOCKED zones</div>
+                      <div className="font-medium mb-1">{t("summary.noViolations")}</div>
+                      <div className="text-xs">{t("summary.noViolations.desc")}</div>
                     </div>
                   </div>
                   {routeResult.gallery_id ? (
                     <Button variant="outline" className="w-full" onClick={handleOpenLatestGallery}>
-                      Open In Gallery ({routeResult.gallery_id})
+                      {t("workspace.openGallery")} ({routeResult.gallery_id})
                     </Button>
                   ) : null}
                 </div>
               ) : (
                 <div className="p-8 text-center border-2 border-dashed border-border rounded-lg">
                   <Navigation className="size-8 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">Plan a route to see summary metrics</p>
+                  <p className="text-sm text-muted-foreground">{t("summary.planToSee")}</p>
                 </div>
               )}
             </div>
 
             {routeResult && (
               <div>
-                <h3 className="mb-3">Explainability</h3>
+                <h3 className="mb-3">{t("explain.title")}</h3>
                 <Card>
                   <CardContent className="pt-4 space-y-2 text-sm">
                     <div className="flex gap-2">
                       <div className="text-green-600 mt-0.5">OK</div>
-                      <div>Avoided all BLOCKED zones (bathymetry + U-Net predictions)</div>
+                      <div>{t("explain.reason1")}</div>
                     </div>
                     <div className="flex gap-2">
                       <div className="text-green-600 mt-0.5">OK</div>
-                      <div>Minimized total distance under safety constraints</div>
+                      <div>{t("explain.reason2")}</div>
                     </div>
                     <div className="flex gap-2">
                       <div className="text-blue-600 mt-0.5">-&gt;</div>
-                      <div>Applied mild preference ({(corridorBias[0] / 100).toFixed(2)}) toward AIS corridor</div>
+                      <div>
+                        {t("explain.reason3")} ({(corridorBias[0] / 100).toFixed(2)})
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <div className="text-amber-600 mt-0.5">
                         <AlertCircle className="size-3" />
                       </div>
-                      <div>{routeSummary.cautionPct}% of route in CAUTION zones</div>
+                      <div>
+                        {routeSummary.cautionPct}% {t("explain.reason4")}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

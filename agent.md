@@ -218,3 +218,7 @@
 - 2026-02-10T16:38:18.6794975Z | Moved html2canvas to dynamic import in frontend/src/pages/MapWorkspace.tsx so capture logic is loaded on demand after planning.
 - 2026-02-10T16:38:18.6794975Z | Added manual chunk strategy in frontend/vite.config.ts to split map-vendor, capture-vendor, router-vendor, ui-vendor, and generic vendor bundles.
 - 2026-02-10T16:38:18.6794975Z | Validation: npm run build (frontend) succeeded with split chunks (largest single chunk reduced from previous monolith); python -m pytest -q (backend) -> 29 passed, 1 warning.
+- 2026-02-10T16:46:21.3082417Z | Standardized frontend API error handling in frontend/src/api/client.ts: added ApiError, JSON/detail parsing, throwApiError helper, and getErrorMessage utility used by UI toasts.
+- 2026-02-10T16:46:21.3082417Z | Replaced mixed i18n setup by rewriting frontend/src/contexts/LanguageContext.tsx with clean EN/ZH dictionaries for currently used keys, removing prior garbled zh text and react-i18next mismatch.
+- 2026-02-10T16:46:21.3082417Z | Updated frontend map/gallery pages and components to consume translated keys and normalized error messages (MapWorkspace, ExportReport, CoordinateInput, MapCanvas).
+- 2026-02-10T16:46:21.3082417Z | Validation: npm run build (frontend) succeeded with split chunks; python -m pytest -q (backend) -> 29 passed, 1 warning.

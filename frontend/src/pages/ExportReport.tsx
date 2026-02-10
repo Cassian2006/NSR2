@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import {
   deleteGalleryItem,
+  getErrorMessage,
   getGalleryImageUrl,
   getGalleryItem,
   getGalleryList,
@@ -12,6 +13,7 @@ import {
   type AisBacktestMetrics,
   type GalleryItem,
 } from "../api/client";
+import { useLanguage } from "../contexts/LanguageContext";
 import StatCard from "../components/StatCard";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -42,6 +44,7 @@ async function downloadImageFile(filename: string, imageUrl: string) {
 }
 
 export default function ExportReport() {
+  const { t } = useLanguage();
   const [searchParams] = useSearchParams();
   const queryGalleryId = searchParams.get("gallery");
 
@@ -68,7 +71,7 @@ export default function ExportReport() {
         });
       }
     } catch (error) {
-      toast.error(`Failed to load gallery list: ${String(error)}`);
+      toast.error(`${t("toast.loadGalleryListFailed")}: ${getErrorMessage(error)}`);
     } finally {
       setLoadingList(false);
     }
@@ -94,7 +97,7 @@ export default function ExportReport() {
         setBacktest(null);
       } catch (error) {
         if (!active) return;
-        toast.error(`Failed to load gallery item: ${String(error)}`);
+        toast.error(`${t("toast.loadGalleryItemFailed")}: ${getErrorMessage(error)}`);
       } finally {
         if (active) setLoadingDetail(false);
       }
@@ -118,35 +121,35 @@ export default function ExportReport() {
     if (!ok) return;
     try {
       await deleteGalleryItem(selectedItem.id);
-      toast.success("Gallery item deleted");
+      toast.success(t("toast.galleryDeleted"));
       await loadList();
     } catch (error) {
-      toast.error(`Delete failed: ${String(error)}`);
+      toast.error(`${t("toast.deleteFailed")}: ${getErrorMessage(error)}`);
     }
   };
 
   const handleDownloadRoute = () => {
     if (!selectedItem?.route_geojson) {
-      toast.error("No route geojson in this item");
+      toast.error(t("toast.noRouteGeojson"));
       return;
     }
     downloadJsonFile(`route_${selectedItem.id}.geojson`, selectedItem.route_geojson);
-    toast.success("Route GeoJSON downloaded");
+    toast.success(t("toast.routeDownloaded"));
   };
 
   const handleDownloadReport = () => {
     if (!selectedItem) return;
     downloadJsonFile(`report_${selectedItem.id}.json`, selectedItem);
-    toast.success("Report JSON downloaded");
+    toast.success(t("toast.reportDownloaded"));
   };
 
   const handleDownloadImage = async () => {
     if (!selectedItem) return;
     try {
       await downloadImageFile(`gallery_${selectedItem.id}.png`, imageUrl);
-      toast.success("Image downloaded");
+      toast.success(t("toast.imageDownloaded"));
     } catch (error) {
-      toast.error(String(error));
+      toast.error(getErrorMessage(error));
     }
   };
 
@@ -156,9 +159,9 @@ export default function ExportReport() {
     try {
       const res = await runAisBacktest({ gallery_id: selectedItem.id });
       setBacktest(res.metrics);
-      toast.success("AIS backtest finished");
+      toast.success(t("toast.backtestDone"));
     } catch (error) {
-      toast.error(`AIS backtest failed: ${String(error)}`);
+      toast.error(`${t("toast.backtestFailed")}: ${getErrorMessage(error)}`);
     } finally {
       setEvaluating(false);
     }
@@ -169,24 +172,24 @@ export default function ExportReport() {
       <div className="max-w-7xl mx-auto p-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="mb-1">Gallery & Export</h1>
-            <p className="text-muted-foreground">Review saved planning runs, inspect metadata, download outputs.</p>
+            <h1 className="mb-1">{t("export.title")}</h1>
+            <p className="text-muted-foreground">{t("export.subtitle")}</p>
           </div>
           <Button variant="outline" className="gap-2" onClick={loadList} disabled={loadingList}>
             <RefreshCw className={`size-4 ${loadingList ? "animate-spin" : ""}`} />
-            Refresh
+            {t("export.refresh")}
           </Button>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
           <Card>
             <CardHeader>
-              <CardTitle>Saved Runs</CardTitle>
+              <CardTitle>{t("export.savedRuns")}</CardTitle>
               <CardDescription>{items.length} item(s)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {items.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No gallery items yet.</div>
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">{t("export.noItems")}</div>
               ) : (
                 items.map((item) => {
                   const active = item.id === selectedId;
@@ -211,27 +214,27 @@ export default function ExportReport() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Run Detail</CardTitle>
-              <CardDescription>{selectedItem ? selectedItem.id : "Select an item from left list"}</CardDescription>
+              <CardTitle>{t("export.runDetail")}</CardTitle>
+              <CardDescription>{selectedItem ? selectedItem.id : t("export.noSelection")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {!selectedItem || loadingDetail ? (
                 <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  {loadingDetail ? "Loading detail..." : "No run selected"}
+                  {loadingDetail ? t("export.loadingDetail") : t("export.noSelection")}
                 </div>
               ) : (
                 <>
                   <div className="grid gap-3 md:grid-cols-4">
-                    <StatCard label="Distance" value={Number(selectedItem.distance_km ?? 0).toFixed(1)} unit="km" />
-                    <StatCard label="Caution" value={cautionPct.toFixed(1)} unit="%" variant="warning" />
-                    <StatCard label="Corridor Bias" value={Number(selectedItem.corridor_bias ?? 0).toFixed(2)} />
+                    <StatCard label={t("summary.distance")} value={Number(selectedItem.distance_km ?? 0).toFixed(1)} unit="km" />
+                    <StatCard label={t("summary.caution")} value={cautionPct.toFixed(1)} unit="%" variant="warning" />
+                    <StatCard label={t("workspace.corridorBias")} value={Number(selectedItem.corridor_bias ?? 0).toFixed(2)} />
                     <StatCard label="Model" value={String(selectedItem.model_version ?? "unet_v1")} />
                   </div>
 
                   <div className="flex items-center justify-between rounded-lg border bg-white p-3">
-                    <div className="text-sm text-muted-foreground">AIS Backtest</div>
+                    <div className="text-sm text-muted-foreground">{t("export.backtest")}</div>
                     <Button onClick={handleRunBacktest} variant="outline" disabled={evaluating} className="gap-2">
-                      {evaluating ? "Evaluating..." : "Run Backtest"}
+                      {evaluating ? t("export.backtest.loading") : t("export.backtest.run")}
                     </Button>
                   </div>
 
@@ -246,13 +249,13 @@ export default function ExportReport() {
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="rounded-lg border bg-white p-3 text-sm">
-                      <div className="mb-2 text-muted-foreground">Start</div>
+                      <div className="mb-2 text-muted-foreground">{t("workspace.startPoint")}</div>
                       <div className="font-mono">
                         {Number(selectedItem.start?.lat ?? 0).toFixed(4)}, {Number(selectedItem.start?.lon ?? 0).toFixed(4)}
                       </div>
                     </div>
                     <div className="rounded-lg border bg-white p-3 text-sm">
-                      <div className="mb-2 text-muted-foreground">Goal</div>
+                      <div className="mb-2 text-muted-foreground">{t("workspace.goalPoint")}</div>
                       <div className="font-mono">
                         {Number(selectedItem.goal?.lat ?? 0).toFixed(4)}, {Number(selectedItem.goal?.lon ?? 0).toFixed(4)}
                       </div>
@@ -260,7 +263,7 @@ export default function ExportReport() {
                   </div>
 
                   <div className="space-y-3">
-                    <div className="text-sm text-muted-foreground">Preview</div>
+                    <div className="text-sm text-muted-foreground">{t("export.preview")}</div>
                     <div className="overflow-hidden rounded-lg border bg-white">
                       <img src={imageUrl} alt={`gallery-${selectedItem.id}`} className="h-auto w-full object-contain" />
                     </div>
@@ -271,19 +274,19 @@ export default function ExportReport() {
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={handleDownloadRoute} className="gap-2">
                       <FileJson className="size-4" />
-                      Download Route GeoJSON
+                      {t("export.downloadRoute")}
                     </Button>
                     <Button onClick={handleDownloadReport} variant="outline" className="gap-2">
                       <Download className="size-4" />
-                      Download Report JSON
+                      {t("export.downloadReport")}
                     </Button>
                     <Button onClick={handleDownloadImage} variant="outline" className="gap-2">
                       <Image className="size-4" />
-                      Download Image
+                      {t("export.downloadImage")}
                     </Button>
                     <Button onClick={handleDelete} variant="destructive" className="gap-2">
                       <Trash2 className="size-4" />
-                      Delete
+                      {t("export.delete")}
                     </Button>
                   </div>
                 </>

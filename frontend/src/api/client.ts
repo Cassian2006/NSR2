@@ -1,6 +1,50 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/v1";
 const API_ORIGIN = API_BASE.endsWith("/v1") ? API_BASE.slice(0, -3) : API_BASE;
 
+export class ApiError extends Error {
+  status: number;
+  detail: unknown;
+
+  constructor(status: number, message: string, detail: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function normalizeErrorMessage(status: number, detail: unknown): string {
+  if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (detail && typeof detail === "object") {
+    const obj = detail as Record<string, unknown>;
+    if (typeof obj.message === "string" && obj.message.trim()) return obj.message.trim();
+    if (typeof obj.detail === "string" && obj.detail.trim()) return obj.detail.trim();
+  }
+  return `Request failed (HTTP ${status})`;
+}
+
+async function throwApiError(res: Response): Promise<never> {
+  let detail: unknown = null;
+  const contentType = res.headers.get("content-type") || "";
+  try {
+    if (contentType.includes("application/json")) {
+      const payload = await res.json();
+      detail = payload?.detail ?? payload;
+    } else {
+      detail = await res.text();
+    }
+  } catch {
+    detail = null;
+  }
+  throw new ApiError(res.status, normalizeErrorMessage(res.status, detail), detail);
+}
+
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 export type LayerInfo = {
   id: string;
   name: string;
@@ -82,8 +126,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`HTTP ${res.status}: ${detail}`);
+    await throwApiError(res);
   }
   return res.json() as Promise<T>;
 }
@@ -131,8 +174,7 @@ export async function deleteGalleryItem(galleryId: string) {
     method: "DELETE",
   });
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`HTTP ${res.status}: ${detail}`);
+    await throwApiError(res);
   }
 }
 
@@ -143,8 +185,7 @@ export async function uploadGalleryImage(galleryId: string, imageBase64: string)
     body: JSON.stringify({ image_base64: imageBase64 }),
   });
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`HTTP ${res.status}: ${detail}`);
+    await throwApiError(res);
   }
 }
 
