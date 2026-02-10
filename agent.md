@@ -371,3 +371,8 @@
 - 2026-02-10T23:30:08.8972577Z | Validation before GitHub submit: python -m pytest -q (backend) -> 44 passed; npm run build (frontend) succeeded.
 - 2026-02-10T23:30:37.5766101Z | Created commit 9174270: latest planner/live-data pipeline, progress endpoint/workflow, benchmark script, and full Chinese UI localization pass.
 - 2026-02-10T23:30:37.5766101Z | Pushed commit 9174270 to origin/main (https://github.com/Cassian2006/NSR2.git).
+- 2026-02-10T23:54:35.1750768Z | Added dynamic routing capability: new backend endpoint POST /v1/route/plan/dynamic with timestamp sequence + advance_steps, supporting A* full recompute and D* Lite incremental replanning.
+- 2026-02-10T23:54:35.1750768Z | Implemented incremental D* Lite planner in backend/app/planning/router.py with blocked-cell delta updates, start movement updates, and per-step runtime/change telemetry in explain.dynamic_replans.
+- 2026-02-10T23:54:35.1750768Z | Added API coverage test backend/tests/test_api_smoke.py::test_dynamic_route_plan_replanning and client helper planDynamicRoute in frontend/src/api/client.ts.
+- 2026-02-10T23:54:35.1750768Z | Updated benchmark script backend/scripts/benchmark_planners.py: supports dynamic benchmark (--dynamic-window/--advance-steps), grouped summary by mode:planner, and heterogeneous CSV rows.
+- 2026-02-10T23:54:35.1750768Z | Validation: python -m pytest -q (backend) -> 45 passed; npm run build (frontend) succeeded; dynamic benchmark sample showed dynamic:dstar_lite runtime 4900ms vs dynamic:astar 5951ms (outputs/benchmarks/planner_benchmark_20260210_235344.*).

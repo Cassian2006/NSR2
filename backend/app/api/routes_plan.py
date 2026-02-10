@@ -5,8 +5,8 @@ from fastapi import APIRouter, HTTPException
 from app.core.config import get_settings
 from app.core.gallery import GalleryService
 from app.core.dataset import normalize_timestamp
-from app.core.schemas import RoutePlanRequest
-from app.planning.router import PlanningError, plan_grid_route
+from app.core.schemas import DynamicRoutePlanRequest, RoutePlanRequest
+from app.planning.router import PlanningError, plan_grid_route, plan_grid_route_dynamic
 
 
 router = APIRouter(tags=["plan"])
@@ -65,6 +65,87 @@ def plan_route(payload: RoutePlanRequest) -> dict:
     gallery_id = GalleryService().create(
         {
             "timestamp": timestamp,
+            "layers": ["bathy", "ais_heatmap", "unet_pred"],
+            "start": payload.start.model_dump(),
+            "goal": payload.goal.model_dump(),
+            "distance_km": result.explain["distance_km"],
+            "caution_len_km": result.explain["caution_len_km"],
+            "corridor_bias": payload.policy.corridor_bias,
+            "model_version": "unet_v1",
+            "route_geojson": result.route_geojson,
+            "explain": result.explain,
+            "action": action,
+            "result": plan_result,
+            "timeline": timeline,
+        }
+    )
+
+    return {
+        "route_geojson": result.route_geojson,
+        "explain": result.explain,
+        "gallery_id": gallery_id,
+    }
+
+
+@router.post("/route/plan/dynamic")
+def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
+    settings = get_settings()
+    try:
+        timestamps = [normalize_timestamp(ts) for ts in payload.timestamps]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if len(timestamps) < 2:
+        raise HTTPException(status_code=422, detail="Dynamic route planning requires at least 2 timestamps.")
+
+    try:
+        result = plan_grid_route_dynamic(
+            settings=settings,
+            timestamps=timestamps,
+            start=(payload.start.lat, payload.start.lon),
+            goal=(payload.goal.lat, payload.goal.lon),
+            model_version="unet_v1",
+            corridor_bias=payload.policy.corridor_bias,
+            caution_mode=payload.policy.caution_mode,
+            smoothing=payload.policy.smoothing,
+            blocked_sources=payload.policy.blocked_sources,
+            planner=payload.policy.planner,
+            advance_steps=payload.advance_steps,
+        )
+    except PlanningError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    route_coords = result.route_geojson.get("geometry", {}).get("coordinates", [])
+    action = {
+        "type": "route_plan_dynamic",
+        "timestamps": timestamps,
+        "start_input": payload.start.model_dump(),
+        "goal_input": payload.goal.model_dump(),
+        "advance_steps": payload.advance_steps,
+        "policy": payload.policy.model_dump(),
+    }
+    plan_result = {
+        "status": "success",
+        "distance_km": result.explain["distance_km"],
+        "distance_nm": result.explain["distance_nm"],
+        "caution_len_km": result.explain["caution_len_km"],
+        "corridor_alignment": result.explain["corridor_alignment"],
+        "route_points": len(route_coords) if isinstance(route_coords, list) else 0,
+        "replan_count": len(result.explain.get("dynamic_replans", [])),
+        "executed_edges": int(result.explain.get("executed_edges", 0)),
+    }
+    timeline = [
+        {"event": "dynamic_route_plan_requested", "status": "ok"},
+        {
+            "event": "dynamic_route_plan_completed",
+            "status": "ok",
+            "result_status": "success",
+            "replan_count": len(result.explain.get("dynamic_replans", [])),
+        },
+    ]
+
+    gallery_id = GalleryService().create(
+        {
+            "timestamp": timestamps[0],
             "layers": ["bathy", "ais_heatmap", "unet_pred"],
             "start": payload.start.model_dump(),
             "goal": payload.goal.model_dump(),

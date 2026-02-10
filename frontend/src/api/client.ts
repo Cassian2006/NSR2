@@ -68,6 +68,21 @@ export type RoutePlanRequest = {
   };
 };
 
+export type DynamicRoutePlanRequest = {
+  timestamps: string[];
+  start: { lat: number; lon: number };
+  goal: { lat: number; lon: number };
+  advance_steps: number;
+  policy: {
+    objective: string;
+    blocked_sources: string[];
+    caution_mode: string;
+    corridor_bias: number;
+    smoothing: boolean;
+    planner?: string;
+  };
+};
+
 export type RoutePlanResponse = {
   route_geojson: {
     type: "Feature";
@@ -185,6 +200,13 @@ export async function getLayers(timestamp: string) {
 
 export async function planRoute(payload: RoutePlanRequest) {
   return apiFetch<RoutePlanResponse>("/route/plan", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function planDynamicRoute(payload: DynamicRoutePlanRequest) {
+  return apiFetch<RoutePlanResponse>("/route/plan/dynamic", {
     method: "POST",
     body: JSON.stringify(payload),
   });

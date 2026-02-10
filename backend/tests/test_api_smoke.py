@@ -156,6 +156,43 @@ def test_route_plan_modes(client: TestClient) -> None:
     assert explain["planner"] == "dstar_lite"
 
 
+def test_dynamic_route_plan_replanning(client: TestClient) -> None:
+    ts_resp = client.get("/v1/timestamps")
+    assert ts_resp.status_code == 200
+    timestamps = ts_resp.json().get("timestamps", [])
+    if len(timestamps) < 2:
+        pytest.skip("Need at least 2 timestamps for dynamic replanning test")
+
+    selected = timestamps[: min(3, len(timestamps))]
+    payload = {
+        "timestamps": selected,
+        "start": TEST_START,
+        "goal": TEST_GOAL,
+        "advance_steps": 8,
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "tie_breaker",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+            "planner": "dstar_lite",
+        },
+    }
+    resp = client.post("/v1/route/plan/dynamic", json=payload)
+    assert resp.status_code == 200
+    explain = resp.json()["explain"]
+    assert explain["planner"] == "dstar_lite_incremental"
+    assert isinstance(explain.get("dynamic_replans"), list)
+    assert len(explain["dynamic_replans"]) >= 1
+    assert explain.get("executed_edges", 0) >= 1
+
+    payload["policy"]["planner"] = "astar"
+    resp_astar = client.post("/v1/route/plan/dynamic", json=payload)
+    assert resp_astar.status_code == 200
+    explain_astar = resp_astar.json()["explain"]
+    assert explain_astar["planner"] == "astar_recompute"
+
+
 def test_latest_plan_fallback(client: TestClient) -> None:
     payload = {
         "date": "2024-10-15",

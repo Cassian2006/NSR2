@@ -27,6 +27,14 @@ class RoutePlanRequest(BaseModel):
     policy: PlanPolicy = Field(default_factory=PlanPolicy)
 
 
+class DynamicRoutePlanRequest(BaseModel):
+    timestamps: list[str] = Field(min_length=2)
+    start: Coord
+    goal: Coord
+    advance_steps: int = Field(default=12, ge=1, le=500)
+    policy: PlanPolicy = Field(default_factory=PlanPolicy)
+
+
 class LatestPlanRequest(BaseModel):
     date: str
     hour: int = 12

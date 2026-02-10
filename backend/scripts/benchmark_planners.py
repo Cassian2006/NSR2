@@ -9,7 +9,7 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.dataset import get_dataset_service
-from app.planning.router import PlanningError, plan_grid_route
+from app.planning.router import PlanningError, plan_grid_route, plan_grid_route_dynamic
 
 
 def _parse_latlon(raw: str) -> tuple[float, float]:
@@ -69,6 +69,7 @@ def run_benchmark(
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             rows.append(
                 {
+                    "mode": "static",
                     "timestamp": ts,
                     "planner": planner,
                     "status": status,
@@ -87,11 +88,73 @@ def run_benchmark(
     return rows
 
 
+def run_dynamic_benchmark(
+    *,
+    start: tuple[float, float],
+    goal: tuple[float, float],
+    timestamps: list[str],
+    planners: list[str],
+    corridor_bias: float,
+    advance_steps: int,
+) -> list[dict]:
+    settings = get_settings()
+    rows: list[dict] = []
+    for planner in planners:
+        t0 = time.perf_counter()
+        status = "ok"
+        detail = ""
+        explain = {}
+        try:
+            res = plan_grid_route_dynamic(
+                settings=settings,
+                timestamps=timestamps,
+                start=start,
+                goal=goal,
+                model_version="unet_v1",
+                corridor_bias=corridor_bias,
+                caution_mode="tie_breaker",
+                smoothing=True,
+                blocked_sources=["bathy", "unet_blocked"],
+                planner=planner,
+                advance_steps=advance_steps,
+            )
+            explain = res.explain
+        except PlanningError as exc:
+            status = "fail"
+            detail = str(exc)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        replans = explain.get("dynamic_replans", []) if isinstance(explain, dict) else []
+        rows.append(
+            {
+                "mode": "dynamic",
+                "planner": planner,
+                "status": status,
+                "timestamps": len(timestamps),
+                "advance_steps": int(advance_steps),
+                "runtime_ms": round(elapsed_ms, 3),
+                "distance_km": float(explain.get("distance_km", 0.0)),
+                "caution_len_km": float(explain.get("caution_len_km", 0.0)),
+                "corridor_alignment": float(explain.get("corridor_alignment", 0.0)),
+                "replan_count": len(replans) if isinstance(replans, list) else 0,
+                "avg_replan_ms": round(
+                    float(sum(float(x.get("runtime_ms", 0.0)) for x in replans) / max(1, len(replans))),
+                    3,
+                )
+                if isinstance(replans, list) and replans
+                else 0.0,
+                "detail": detail,
+            }
+        )
+    return rows
+
+
 def summarize(rows: list[dict]) -> dict:
     summary: dict[str, dict] = {}
     by_planner: dict[str, list[dict]] = {}
     for row in rows:
-        by_planner.setdefault(row["planner"], []).append(row)
+        mode = str(row.get("mode", "static"))
+        group = f"{mode}:{row['planner']}"
+        by_planner.setdefault(group, []).append(row)
 
     for planner, items in by_planner.items():
         ok = [x for x in items if x["status"] == "ok"]
@@ -123,6 +186,8 @@ def main() -> None:
     parser.add_argument("--goal", type=str, default="72.0,150.0", help="goal lat,lon")
     parser.add_argument("--timestamps", type=int, default=12, help="sample count across full timeline")
     parser.add_argument("--corridor-bias", type=float, default=0.2)
+    parser.add_argument("--dynamic-window", type=int, default=0, help=">1 to run dynamic incremental benchmark")
+    parser.add_argument("--advance-steps", type=int, default=12)
     parser.add_argument("--out-dir", type=Path, default=Path("outputs") / "benchmarks")
     args = parser.parse_args()
 
@@ -137,6 +202,21 @@ def main() -> None:
         planners=planners,
         corridor_bias=float(args.corridor_bias),
     )
+    if int(args.dynamic_window) > 1:
+        all_ts = get_dataset_service().list_timestamps(month="all")
+        if len(all_ts) < int(args.dynamic_window):
+            raise RuntimeError(f"Not enough timestamps for dynamic window={args.dynamic_window}")
+        dynamic_ts = all_ts[: int(args.dynamic_window)]
+        rows.extend(
+            run_dynamic_benchmark(
+                start=start,
+                goal=goal,
+                timestamps=dynamic_ts,
+                planners=planners,
+                corridor_bias=float(args.corridor_bias),
+                advance_steps=int(args.advance_steps),
+            )
+        )
     summary = summarize(rows)
 
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -146,7 +226,8 @@ def main() -> None:
     json_path = out_dir / f"planner_benchmark_{ts}.json"
 
     with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        fieldnames = sorted({k for row in rows for k in row.keys()})
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
