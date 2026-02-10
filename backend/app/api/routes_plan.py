@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from app.core.config import get_settings
 from app.core.gallery import GalleryService
+from app.core.dataset import normalize_timestamp
 from app.core.schemas import RoutePlanRequest
-from app.planning.router import plan_simple_route
+from app.planning.router import PlanningError, plan_grid_route
 
 
 router = APIRouter(tags=["plan"])
@@ -12,17 +14,30 @@ router = APIRouter(tags=["plan"])
 
 @router.post("/route/plan")
 def plan_route(payload: RoutePlanRequest) -> dict:
-    result = plan_simple_route(
-        start=(payload.start.lat, payload.start.lon),
-        goal=(payload.goal.lat, payload.goal.lon),
-        corridor_bias=payload.policy.corridor_bias,
-        caution_mode=payload.policy.caution_mode,
-        smoothing=payload.policy.smoothing,
-    )
+    settings = get_settings()
+    try:
+        timestamp = normalize_timestamp(payload.timestamp)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        result = plan_grid_route(
+            settings=settings,
+            timestamp=timestamp,
+            start=(payload.start.lat, payload.start.lon),
+            goal=(payload.goal.lat, payload.goal.lon),
+            model_version="unet_v1",
+            corridor_bias=payload.policy.corridor_bias,
+            caution_mode=payload.policy.caution_mode,
+            smoothing=payload.policy.smoothing,
+            blocked_sources=payload.policy.blocked_sources,
+        )
+    except PlanningError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     gallery_id = GalleryService().create(
         {
-            "timestamp": payload.timestamp,
+            "timestamp": timestamp,
             "layers": ["bathy", "ais_heatmap", "unet_pred"],
             "start": payload.start.model_dump(),
             "goal": payload.goal.model_dump(),
@@ -40,4 +55,3 @@ def plan_route(payload: RoutePlanRequest) -> dict:
         "explain": result.explain,
         "gallery_id": gallery_id,
     }
-

@@ -167,3 +167,6 @@
 - 2026-02-10T15:32:00.1755556Z | Updated dataset timestamp source to prefer annotation_pack and fallback to legacy samples only when annotation_pack unavailable, aligning /v1/timestamps with infer-ready data.
 - 2026-02-10T15:32:00.1755556Z | Added inference runtime regression test backend/tests/test_model_infer_runtime.py (persist + cache-hit behavior).
 - 2026-02-10T15:32:00.1755556Z | Validation: python -m pytest -q in backend -> 20 passed.
+- 2026-02-10T15:35:47.3796775Z | Upgraded /v1/route/plan from straight-line stub to grid-based constrained planner (A*): blocked = bathy OR unet_blocked, start/goal snapping to nearest navigable cell, optional smoothing, and explain metrics (distance/caution_len/corridor_alignment).
+- 2026-02-10T15:35:47.3796775Z | routes_plan now normalizes timestamp, validates planning errors as HTTP 422, and writes gallery metadata from constrained plan outputs.
+- 2026-02-10T15:35:47.3796775Z | Validation: python -m pytest -q in backend -> 20 passed.
