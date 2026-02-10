@@ -136,6 +136,18 @@ export async function deleteGalleryItem(galleryId: string) {
   }
 }
 
+export async function uploadGalleryImage(galleryId: string, imageBase64: string) {
+  const res = await fetch(`${API_BASE}/gallery/${encodeURIComponent(galleryId)}/image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image_base64: imageBase64 }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`HTTP ${res.status}: ${detail}`);
+  }
+}
+
 export function getGalleryImageUrl(galleryId: string): string {
   return `${API_BASE}/gallery/${encodeURIComponent(galleryId)}/image.png`;
 }

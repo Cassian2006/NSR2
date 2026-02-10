@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,16 @@ def test_route_plan_and_gallery(client: TestClient) -> None:
     assert image_resp.headers["content-type"] == "image/png"
     # Non-trivial preview image should be larger than placeholder 1x1 PNG.
     assert len(image_resp.content) > 500
+
+    one_px_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2NcAoAAAAASUVORK5CYII="
+    upload_resp = client.post(
+        f"/v1/gallery/{plan['gallery_id']}/image",
+        json={"image_base64": one_px_png},
+    )
+    assert upload_resp.status_code == 204
+    image_resp2 = client.get(f"/v1/gallery/{plan['gallery_id']}/image.png")
+    assert image_resp2.status_code == 200
+    assert image_resp2.content == base64.b64decode(one_px_png)
 
 
 def test_route_plan_modes(client: TestClient) -> None:

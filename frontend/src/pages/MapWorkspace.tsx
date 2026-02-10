@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
+import html2canvas from "html2canvas";
 
-import { getLayers, getTimestamps, planRoute, runInference, type InferResponse, type RoutePlanResponse } from "../api/client";
+import { getLayers, getTimestamps, planRoute, runInference, uploadGalleryImage, type InferResponse, type RoutePlanResponse } from "../api/client";
 import CoordinateInput from "../components/CoordinateInput";
 import LayerToggle from "../components/LayerToggle";
 import LegendCard from "../components/LegendCard";
@@ -73,6 +74,7 @@ export default function MapWorkspace() {
   const [pickTarget, setPickTarget] = useState<"start" | "goal" | null>(null);
   const [inferring, setInferring] = useState(false);
   const [inferResult, setInferResult] = useState<InferResponse | null>(null);
+  const mapCaptureRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -163,6 +165,26 @@ export default function MapWorkspace() {
     navigate(`/export?gallery=${encodeURIComponent(routeResult.gallery_id)}`);
   };
 
+  const captureAndUploadGalleryImage = useCallback(async (galleryId: string) => {
+    if (!mapCaptureRef.current) return;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      const canvas = await html2canvas(mapCaptureRef.current, {
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: "#f8fafc",
+        scale: Math.min(2, window.devicePixelRatio || 1),
+      });
+      const dataUrl = canvas.toDataURL("image/png");
+      await uploadGalleryImage(galleryId, dataUrl);
+      toast.success("Gallery screenshot updated", { duration: 1800 });
+    } catch (error) {
+      // Keep planning success even if screenshot capture fails.
+      console.warn("gallery screenshot upload failed", error);
+      toast.warning("Route saved, screenshot kept as backend preview");
+    }
+  }, []);
+
   const handlePlanRoute = async () => {
     const startLatNum = Number.parseFloat(startLat);
     const startLonNum = Number.parseFloat(startLon);
@@ -200,6 +222,7 @@ export default function MapWorkspace() {
       });
       setRouteResult(response);
       toast.success(`${t("toast.success")} (Gallery: ${response.gallery_id})`, { id: "plan-route" });
+      void captureAndUploadGalleryImage(response.gallery_id);
     } catch (error) {
       toast.error(`Route planning failed: ${String(error)}`, { id: "plan-route" });
     } finally {
@@ -439,7 +462,7 @@ export default function MapWorkspace() {
         </ScrollArea>
       </div>
 
-      <div className="flex-1 relative">
+      <div className="flex-1 relative" ref={mapCaptureRef}>
         <MapCanvas
           timestamp={timestamp}
           layers={layers}

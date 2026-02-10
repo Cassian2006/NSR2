@@ -273,6 +273,17 @@ class GalleryService:
             return None
         return path.read_bytes()
 
+    def set_image_bytes(self, gallery_id: str, image_bytes: bytes) -> bool:
+        run_path = self._run_path(gallery_id)
+        if not run_path.exists():
+            return False
+        if len(image_bytes) < 32:
+            raise ValueError("image payload too small")
+        if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("only PNG image is supported")
+        self._image_path(gallery_id).write_bytes(image_bytes)
+        return True
+
     def delete(self, gallery_id: str) -> bool:
         existed = False
         run_path = self._run_path(gallery_id)

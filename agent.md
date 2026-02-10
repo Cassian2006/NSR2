@@ -193,3 +193,9 @@
 - 2026-02-10T16:19:47.2580727Z | Updated frontend/src/pages/MapWorkspace.tsx strict policy mapping to send blocked_sources=[bathy,unet_blocked,unet_caution] and caution_mode=strict.
 - 2026-02-10T16:19:47.2580727Z | Extended backend/tests/test_api_smoke.py with route mode coverage (caution_mode=minimize) and verified effective penalty output.
 - 2026-02-10T16:19:47.2580727Z | Validation: python -m pytest -q (backend) -> 22 passed, 1 warning; npm run build (frontend) succeeded.
+- 2026-02-10T16:22:48.8920172Z | Added gallery image upload endpoint POST /v1/gallery/{id}/image in backend/app/api/routes_gallery.py with base64 decoding + payload validation.
+- 2026-02-10T16:22:48.8920172Z | Extended backend/app/core/gallery.py with set_image_bytes(gallery_id, bytes) to replace preview image when frontend screenshot is available.
+- 2026-02-10T16:22:48.8920172Z | Extended backend/tests/test_api_smoke.py to verify gallery image upload path updates /v1/gallery/{id}/image.png content.
+- 2026-02-10T16:22:48.8920172Z | Added frontend API method uploadGalleryImage in frontend/src/api/client.ts and wired MapWorkspace automatic screenshot upload after successful route planning.
+- 2026-02-10T16:22:48.8920172Z | Integrated html2canvas dependency for front-end map capture; map pane is captured and uploaded as PNG data URL, with graceful fallback to backend preview on failure.
+- 2026-02-10T16:22:48.8920172Z | Validation: python -m pytest -q (backend) -> 22 passed, 1 warning; npm run build (frontend) succeeded.
