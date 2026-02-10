@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/v1";
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/v1";
+const API_BASE = RAW_API_BASE.endsWith("/v1") ? RAW_API_BASE : `${RAW_API_BASE.replace(/\/+$/, "")}/v1`;
 const API_ORIGIN = API_BASE.endsWith("/v1") ? API_BASE.slice(0, -3) : API_BASE;
 
 export class ApiError extends Error {

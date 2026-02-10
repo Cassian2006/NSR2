@@ -11,8 +11,8 @@
 
 ### Frontend (`nsr2-web`)
 - `VITE_API_BASE_URL`
-  - Example: `https://nsr2-api.onrender.com/v1`
-  - Must point to your backend public URL.
+  - Blueprint now sets this from backend `RENDER_EXTERNAL_URL`.
+  - Frontend auto-normalizes and appends `/v1` when missing.
 
 ### Backend (`nsr2-api`)
 - `NSR_CORS_ORIGIN_REGEX`

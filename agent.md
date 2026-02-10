@@ -300,3 +300,8 @@
 - 2026-02-10T20:51:59.2742179+00:00 | Fixed Render Blueprint compatibility for accounts rejecting type=static: updated render.yaml frontend service to type=web + runtime=static; reverted backend service key to runtime=python.
 - 2026-02-10T20:51:59.2742179+00:00 | Updated DEPLOY_RENDER.md wording to match runtime:static blueprint setup.
 - 2026-02-10T20:56:44.3500366+00:00 | Pre-submit validation before Render-blueprint-fix push: python -m pytest -q (backend) -> 40 passed.
+- 2026-02-10T21:00:00.8392143+00:00 | Hardened render.yaml for Blueprint compatibility: removed optional env vars that may fail schema checks and switched frontend VITE_API_BASE_URL to fromService(RENDER_EXTERNAL_URL) wiring.
+- 2026-02-10T21:00:00.8392143+00:00 | Updated frontend/src/api/client.ts to normalize VITE_API_BASE_URL by auto-appending /v1 when env value is a bare origin.
+- 2026-02-10T21:00:00.8392143+00:00 | Updated DEPLOY_RENDER.md to reflect fromService-based API URL wiring and /v1 auto-normalization.
+- 2026-02-10T21:00:30.4467450+00:00 | Validation after Blueprint-compat hardening: npm run build (frontend) succeeded.
+- 2026-02-10T21:00:30.4467450+00:00 | Validation after Blueprint-compat hardening: python -m pytest -q (backend) -> 40 passed.
