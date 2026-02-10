@@ -116,3 +116,7 @@
 - 2026-02-09T23:21:23+00:00 | Pre-submit validation before push: python -m pytest -q in backend -> 17 passed.
 - 2026-02-09T23:21:23+00:00 | Committed bef9055: feat: finalize active review labels and retrain on 52 samples.
 - 2026-02-09T23:21:23+00:00 | Pushed bef9055 to origin/main.
+- 2026-02-09T23:27:35+00:00 | Started new active-learning round: generated active_20260209_232624 top-20 and review overlays at outputs/active_learning/active_20260209_232624/labelme_active_topk/review_overlay20; restarted Labelme on review folder.
+- 2026-02-10T12:13:32+00:00 | Finalized active round active_20260209_232624 review labels into annotation_pack: merged=11, suggest_only=9.
+- 2026-02-10T12:13:32+00:00 | Rebuilt labeled manifest after round merge: data/processed/unet_manifest_labeled.csv -> rows=72 (train=57, val=15, val_month=202408).
+- 2026-02-10T12:13:32+00:00 | Retrained quick U-Net on 72 labels: outputs/train_runs/unet_quick_20260210_121250/summary.json (best val_loss=0.3840, val_miou=0.6461, val_iou_caution=0.3801, val_iou_blocked=0.8822).
