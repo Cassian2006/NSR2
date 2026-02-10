@@ -211,3 +211,6 @@
 - 2026-02-10T16:31:05.6419781Z | Integrated geo mapping into backend/app/core/render.py and backend/app/eval/compare_ais.py so overlay sampling and AIS backtest use the same coordinate mapping logic as planner.
 - 2026-02-10T16:31:05.6419781Z | Added unit coverage in backend/tests/test_geo_mapping.py for axis roundtrip, annotation-axis preference, and fallback bound behavior.
 - 2026-02-10T16:31:05.6419781Z | Validation: python -m pytest -q (backend) -> 26 passed, 1 warning; npm run build (frontend) succeeded.
+- 2026-02-10T16:32:32.3868028Z | Upgraded route smoothing in backend/app/planning/router.py from direction-compression to obstacle-aware line-of-sight simplification using Bresenham visibility checks (_line_of_sight + _smooth_cells_los).
+- 2026-02-10T16:32:32.3868028Z | Added smoothing unit tests in backend/tests/test_router_smoothing.py covering obstacle intersection, aggressive simplification without obstacles, and turn preservation when shortcuts are blocked.
+- 2026-02-10T16:32:32.3868028Z | Validation: python -m pytest -q (backend) -> 29 passed, 1 warning; npm run build (frontend) succeeded.

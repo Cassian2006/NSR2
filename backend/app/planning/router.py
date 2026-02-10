@@ -92,26 +92,49 @@ def _nearest_unblocked(
     return int(rr), int(cc)
 
 
-def _smooth_cells(cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
+def _line_of_sight(a: tuple[int, int], b: tuple[int, int], blocked: np.ndarray) -> bool:
+    """Integer Bresenham LOS check; false when a blocked cell is crossed."""
+    r0, c0 = a
+    r1, c1 = b
+    dr = abs(r1 - r0)
+    dc = abs(c1 - c0)
+    sr = 1 if r0 < r1 else -1
+    sc = 1 if c0 < c1 else -1
+    err = dr - dc
+
+    r, c = r0, c0
+    h, w = blocked.shape
+    while True:
+        if not (0 <= r < h and 0 <= c < w):
+            return False
+        if blocked[r, c]:
+            return False
+        if r == r1 and c == c1:
+            return True
+        e2 = 2 * err
+        if e2 > -dc:
+            err -= dc
+            r += sr
+        if e2 < dr:
+            err += dr
+            c += sc
+
+
+def _smooth_cells_los(cells: list[tuple[int, int]], blocked: np.ndarray) -> list[tuple[int, int]]:
+    """Greedy farthest-visible simplification, preserving navigability."""
     if len(cells) <= 2:
         return cells
     out = [cells[0]]
-    prev_dr = None
-    prev_dc = None
-    for i in range(1, len(cells)):
-        r0, c0 = cells[i - 1]
-        r1, c1 = cells[i]
-        dr = r1 - r0
-        dc = c1 - c0
-        if prev_dr is None:
-            prev_dr, prev_dc = dr, dc
-            out.append(cells[i])
-            continue
-        if dr == prev_dr and dc == prev_dc:
-            out[-1] = cells[i]
-        else:
-            out.append(cells[i])
-        prev_dr, prev_dc = dr, dc
+    i = 0
+    n = len(cells)
+    while i < n - 1:
+        j = n - 1
+        while j > i + 1:
+            if _line_of_sight(cells[i], cells[j], blocked):
+                break
+            j -= 1
+        out.append(cells[j])
+        i = j
     return out
 
 
@@ -267,7 +290,7 @@ def plan_grid_route(
     cells = _reconstruct_path(came_from, (gr, gc))
     raw_cells = cells[:]
     if smoothing:
-        cells = _smooth_cells(cells)
+        cells = _smooth_cells_los(cells, blocked)
 
     coords: list[list[float]] = []
     raw_distance_km = 0.0
