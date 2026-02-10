@@ -34,8 +34,8 @@ interface MapCanvasProps {
 
 const API_ORIGIN = getApiOrigin();
 const INITIAL_BOUNDS: LatLngBoundsExpression = [
-  [66, -180],
-  [86, 180],
+  [60, 20],
+  [80, 180],
 ];
 
 function RasterTileLayer({

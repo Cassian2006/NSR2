@@ -13,6 +13,10 @@ from app.core.geo import load_grid_geo
 from app.main import app
 
 
+TEST_START = {"lat": 70.5, "lon": 30.0}
+TEST_GOAL = {"lat": 72.0, "lon": 150.0}
+
+
 @pytest.fixture()
 def client() -> TestClient:
     return TestClient(app)
@@ -78,8 +82,8 @@ def test_route_plan_and_gallery(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     plan_payload = {
         "timestamp": ts,
-        "start": {"lat": 78.2467, "lon": 15.4650},
-        "goal": {"lat": 81.5074, "lon": 58.3811},
+        "start": TEST_START,
+        "goal": TEST_GOAL,
         "policy": {
             "objective": "shortest_distance_under_safety",
             "blocked_sources": ["bathy", "unet_blocked"],
@@ -119,8 +123,8 @@ def test_route_plan_modes(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     payload = {
         "timestamp": ts,
-        "start": {"lat": 78.2467, "lon": 15.4650},
-        "goal": {"lat": 81.5074, "lon": 58.3811},
+        "start": TEST_START,
+        "goal": TEST_GOAL,
         "policy": {
             "objective": "shortest_distance_under_safety",
             "blocked_sources": ["bathy", "unet_blocked"],
@@ -141,8 +145,8 @@ def test_route_plan_is_stable_and_stays_out_of_blocked(client: TestClient) -> No
     ts = normalize_timestamp(ts_ui)
     payload = {
         "timestamp": ts_ui,
-        "start": {"lat": 78.2467, "lon": 15.4650},
-        "goal": {"lat": 81.5074, "lon": 58.3811},
+        "start": TEST_START,
+        "goal": TEST_GOAL,
         "policy": {
             "objective": "shortest_distance_under_safety",
             "blocked_sources": ["bathy", "unet_blocked"],
@@ -187,8 +191,8 @@ def test_eval_ais_backtest(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     plan_payload = {
         "timestamp": ts,
-        "start": {"lat": 78.2467, "lon": 15.4650},
-        "goal": {"lat": 81.5074, "lon": 58.3811},
+        "start": TEST_START,
+        "goal": TEST_GOAL,
         "policy": {
             "objective": "shortest_distance_under_safety",
             "blocked_sources": ["bathy", "unet_blocked"],

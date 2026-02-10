@@ -65,10 +65,10 @@ export default function MapWorkspace() {
 
   const [timestampOptions, setTimestampOptions] = useState<string[]>([]);
   const [timestamp, setTimestamp] = useState(queryTimestamp);
-  const [startLat, setStartLat] = useState("78.2467");
-  const [startLon, setStartLon] = useState("15.4650");
-  const [goalLat, setGoalLat] = useState("81.5074");
-  const [goalLon, setGoalLon] = useState("58.3811");
+  const [startLat, setStartLat] = useState("70.5000");
+  const [startLon, setStartLon] = useState("30.0000");
+  const [goalLat, setGoalLat] = useState("72.0000");
+  const [goalLon, setGoalLon] = useState("150.0000");
 
   const [layers, setLayers] = useState<LayerStates>(DEFAULT_LAYERS);
   const [availability, setAvailability] = useState(AVAILABILITY_DEFAULT);

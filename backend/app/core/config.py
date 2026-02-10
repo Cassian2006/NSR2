@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     outputs_root: Path = project_root / "outputs"
     processed_samples_root: Path = data_root / "processed" / "samples"
     annotation_pack_root: Path = data_root / "processed" / "annotation_pack"
+    env_grids_root: Path = data_root / "interim" / "env_grids"
     dataset_index_path: Path = data_root / "processed" / "dataset" / "index.json"
     ais_heatmap_root: Path = data_root / "ais_heatmap"
     gallery_root: Path = outputs_root / "gallery"

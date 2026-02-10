@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -77,9 +78,40 @@ def _find_axis_file(pack_dir: Path, candidates: list[str]) -> Path | None:
     return None
 
 
+def _load_axes_from_meta(meta_path: Path, h: int, w: int) -> tuple[np.ndarray, np.ndarray] | None:
+    if not meta_path.exists():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    target_lat = np.asarray(meta.get("target_lat", []), dtype=np.float64)
+    target_lon = np.asarray(meta.get("target_lon", []), dtype=np.float64)
+    if target_lat.ndim == 1 and target_lon.ndim == 1 and target_lat.size == h and target_lon.size == w:
+        return target_lat, target_lon
+
+    aoi_lat = meta.get("aoi_lat")
+    aoi_lon = meta.get("aoi_lon")
+    if (
+        isinstance(aoi_lat, list)
+        and isinstance(aoi_lon, list)
+        and len(aoi_lat) == 2
+        and len(aoi_lon) == 2
+    ):
+        lat0, lat1 = float(aoi_lat[0]), float(aoi_lat[1])
+        lon0, lon1 = float(aoi_lon[0]), float(aoi_lon[1])
+        lat_axis = np.linspace(lat0, lat1, h, dtype=np.float64)
+        lon_axis = np.linspace(lon0, lon1, w, dtype=np.float64)
+        return lat_axis, lon_axis
+
+    return None
+
+
 @lru_cache(maxsize=512)
 def _load_geo_cached(
     annotation_pack_root: str,
+    env_grids_root: str,
     timestamp: str,
     h: int,
     w: int,
@@ -102,6 +134,14 @@ def _load_geo_cached(
         except Exception:
             pass
 
+    meta_axes = _load_axes_from_meta(pack_dir / "meta.json", h=h, w=w)
+    if meta_axes is not None:
+        return GridGeo(lat_axis=meta_axes[0], lon_axis=meta_axes[1])
+
+    env_meta_axes = _load_axes_from_meta(Path(env_grids_root) / timestamp / "meta.json", h=h, w=w)
+    if env_meta_axes is not None:
+        return GridGeo(lat_axis=env_meta_axes[0], lon_axis=env_meta_axes[1])
+
     lat_axis = np.linspace(lat_max, lat_min, h, dtype=np.float64)
     lon_axis = np.linspace(lon_min, lon_max, w, dtype=np.float64)
     return GridGeo(lat_axis=lat_axis, lon_axis=lon_axis)
@@ -111,6 +151,7 @@ def load_grid_geo(settings: Settings, timestamp: str, shape: tuple[int, int]) ->
     h, w = int(shape[0]), int(shape[1])
     return _load_geo_cached(
         annotation_pack_root=str(settings.annotation_pack_root),
+        env_grids_root=str(settings.env_grids_root),
         timestamp=timestamp,
         h=h,
         w=w,
@@ -119,4 +160,3 @@ def load_grid_geo(settings: Settings, timestamp: str, shape: tuple[int, int]) ->
         lon_min=float(settings.grid_lon_min),
         lon_max=float(settings.grid_lon_max),
     )
-

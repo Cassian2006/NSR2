@@ -245,3 +245,8 @@
 - 2026-02-10T17:47:45.4762048Z | Updated backend/app/api/routes_layers.py /v1/tiles endpoint to use render_tile_png instead of viewport-style overlay rendering.
 - 2026-02-10T17:47:45.4762048Z | Updated frontend/src/pages/MapWorkspace.tsx so planned route markers use actual route endpoints and warning toast is shown when planner snaps start/goal to nearest navigable cell.
 - 2026-02-10T17:47:45.4762048Z | Validation: backend pytest 32 passed; frontend build succeeded.
+- 2026-02-10T17:54:17.0488794Z | Geo mapping fix for overlay alignment: backend/app/core/geo.py now loads grid axes from annotation meta target_lat/target_lon (or aoi_lat/aoi_lon), then falls back to data/interim/env_grids/<timestamp>/meta.json before configured bounds.
+- 2026-02-10T17:54:17.0488794Z | Added env_grids_root to backend/app/core/config.py and wired geo-cache key to include env_grids_root for deterministic lookup.
+- 2026-02-10T17:54:17.0488794Z | Updated frontend defaults to in-domain coordinates and view window for current dataset AOI in frontend/src/pages/MapWorkspace.tsx and frontend/src/components/MapCanvas.tsx.
+- 2026-02-10T17:54:17.0488794Z | Updated backend tests to use in-domain route test coordinates; isolated geo fallback test by setting env_grids_root to tmp path in backend/tests/test_geo_mapping.py.
+- 2026-02-10T17:54:17.0488794Z | Validation: backend pytest 32 passed; frontend build succeeded; runtime tile probe confirms west tile transparent and east tile non-empty after backend restart.

@@ -30,6 +30,7 @@ def test_load_grid_geo_prefers_annotation_axes(tmp_path) -> None:
 
     settings = Settings(
         annotation_pack_root=tmp_path,
+        env_grids_root=tmp_path / "env_grids",
         grid_lat_min=60.0,
         grid_lat_max=86.0,
         grid_lon_min=-180.0,
@@ -47,6 +48,7 @@ def test_load_grid_geo_fallback_to_configured_bounds(tmp_path) -> None:
     (tmp_path / ts).mkdir(parents=True, exist_ok=True)
     settings = Settings(
         annotation_pack_root=tmp_path,
+        env_grids_root=tmp_path / "env_grids",
         grid_lat_min=61.0,
         grid_lat_max=85.0,
         grid_lon_min=-160.0,
@@ -57,4 +59,3 @@ def test_load_grid_geo_fallback_to_configured_bounds(tmp_path) -> None:
     assert geo.bounds.lat_max == 85.0
     assert geo.bounds.lon_min == -160.0
     assert geo.bounds.lon_max == 170.0
-
