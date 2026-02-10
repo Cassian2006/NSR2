@@ -241,3 +241,7 @@
 - 2026-02-10T17:43:52.8381445Z | Reworked frontend map overlay rendering in frontend/src/components/MapCanvas.tsx from viewport ImageOverlay mode to georeferenced XYZ tile layers (/v1/tiles/{layer}/{z}/{x}/{y}.png), with per-layer panes/z-index and timestamp cache key, to improve basemap alignment and zoom behavior.
 - 2026-02-10T17:43:52.8381445Z | Replaced workspace side-panel ScrollArea usage with native overflow containers in frontend/src/pages/MapWorkspace.tsx to guarantee vertical scrolling to the planning controls and route button.
 - 2026-02-10T17:43:52.8381445Z | Validation: npm run build (frontend) succeeded; python -m pytest -q (backend) -> 32 passed.
+- 2026-02-10T17:47:45.4762048Z | Fixed tile-projection alignment drift: added Web-Mercator pixel-to-lat/lon sampling for XYZ tiles in backend/app/core/render.py (render_tile_png + _tile_pixel_latlon_axes + axis-based sampler).
+- 2026-02-10T17:47:45.4762048Z | Updated backend/app/api/routes_layers.py /v1/tiles endpoint to use render_tile_png instead of viewport-style overlay rendering.
+- 2026-02-10T17:47:45.4762048Z | Updated frontend/src/pages/MapWorkspace.tsx so planned route markers use actual route endpoints and warning toast is shown when planner snaps start/goal to nearest navigable cell.
+- 2026-02-10T17:47:45.4762048Z | Validation: backend pytest 32 passed; frontend build succeeded.

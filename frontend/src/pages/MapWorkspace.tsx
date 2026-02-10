@@ -229,6 +229,11 @@ export default function MapWorkspace() {
         },
       });
       setRouteResult(response);
+      const startAdjusted = Boolean(response.explain?.["start_adjusted"]);
+      const goalAdjusted = Boolean(response.explain?.["goal_adjusted"]);
+      if (startAdjusted || goalAdjusted) {
+        toast.warning("Start/Goal adjusted to nearest navigable cell", { id: "plan-adjusted" });
+      }
       toast.success(`${t("toast.success")} (Gallery: ${response.gallery_id})`, { id: "plan-route" });
       void captureAndUploadGalleryImage(response.gallery_id);
     } catch (error) {
@@ -285,8 +290,11 @@ export default function MapWorkspace() {
     toast.success(`${t("toast.mapClicked")} ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
   };
 
-  const mapStart = { lat: Number.parseFloat(startLat) || 0, lon: Number.parseFloat(startLon) || 0 };
-  const mapGoal = { lat: Number.parseFloat(goalLat) || 0, lon: Number.parseFloat(goalLon) || 0 };
+  const plannedCoords = routeResult?.route_geojson?.geometry?.coordinates ?? [];
+  const routedStart = plannedCoords.length ? { lat: plannedCoords[0][1], lon: plannedCoords[0][0] } : null;
+  const routedGoal = plannedCoords.length ? { lat: plannedCoords[plannedCoords.length - 1][1], lon: plannedCoords[plannedCoords.length - 1][0] } : null;
+  const mapStart = routedStart ?? { lat: Number.parseFloat(startLat) || 0, lon: Number.parseFloat(startLon) || 0 };
+  const mapGoal = routedGoal ?? { lat: Number.parseFloat(goalLat) || 0, lon: Number.parseFloat(goalLon) || 0 };
 
   return (
     <div className="h-full min-h-0 overflow-hidden flex bg-gradient-to-br from-gray-50 to-slate-100">

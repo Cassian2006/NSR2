@@ -79,6 +79,21 @@ def tile_bbox(z: int, x: int, y: int) -> BBox:
     return BBox(min_lon=lon_min, min_lat=lat_min, max_lon=lon_max, max_lat=lat_max)
 
 
+def _tile_pixel_latlon_axes(z: int, x: int, y: int, tile_size: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Build per-pixel center lat/lon axes for XYZ tiles in Web Mercator.
+    """
+    n = 2**z
+    px = (np.arange(tile_size, dtype=np.float64) + 0.5) / tile_size
+
+    lon = ((x + px) / n) * 360.0 - 180.0
+
+    tile_y = y + px
+    merc = np.pi * (1.0 - 2.0 * (tile_y / n))
+    lat = np.degrees(np.arctan(np.sinh(merc)))
+    return lat, lon
+
+
 def _png_chunk(tag: bytes, data: bytes) -> bytes:
     crc = binascii.crc32(tag)
     crc = binascii.crc32(data, crc) & 0xFFFFFFFF
@@ -117,10 +132,13 @@ def _lerp_palette(norm: np.ndarray, stops: list[tuple[float, tuple[int, int, int
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int, *, geo: GridGeo) -> tuple[np.ndarray, np.ndarray]:
-    lats = np.linspace(bbox.max_lat, bbox.min_lat, out_h, dtype=np.float64)
-    lons = np.linspace(bbox.min_lon, bbox.max_lon, out_w, dtype=np.float64)
-
+def _sample_grid_from_axes(
+    data: np.ndarray,
+    lats: np.ndarray,
+    lons: np.ndarray,
+    *,
+    geo: GridGeo,
+) -> tuple[np.ndarray, np.ndarray]:
     b = geo.bounds
     lat_in = (lats >= b.lat_min) & (lats <= b.lat_max)
     lon_in = (lons >= b.lon_min) & (lons <= b.lon_max)
@@ -131,6 +149,12 @@ def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int, *, geo: G
 
     sampled = data[np.ix_(row, col)]
     return sampled, inside
+
+
+def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int, *, geo: GridGeo) -> tuple[np.ndarray, np.ndarray]:
+    lats = np.linspace(bbox.max_lat, bbox.min_lat, out_h, dtype=np.float64)
+    lons = np.linspace(bbox.min_lon, bbox.max_lon, out_w, dtype=np.float64)
+    return _sample_grid_from_axes(data, lats, lons, geo=geo)
 
 
 def _empty_image(w: int, h: int) -> np.ndarray:
@@ -306,4 +330,68 @@ def render_overlay_png(
         )
     else:
         image = _empty_image(width, height)
+    return _encode_png_rgba(image)
+
+
+def render_tile_png(
+    *,
+    settings: Settings,
+    timestamp: str,
+    layer: str,
+    z: int,
+    x: int,
+    y: int,
+    tile_size: int = 256,
+) -> bytes:
+    grid = _load_layer_grid(settings, timestamp, layer)
+    if grid is None or grid.ndim != 2:
+        return _encode_png_rgba(_empty_image(tile_size, tile_size))
+
+    geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
+    lats, lons = _tile_pixel_latlon_axes(z=z, x=x, y=y, tile_size=tile_size)
+    sampled, inside = _sample_grid_from_axes(grid.astype(np.float32), lats, lons, geo=geo)
+
+    if layer == "bathy":
+        image = _render_bathy(sampled, inside)
+    elif layer == "unet_pred":
+        image = _render_unet(np.rint(sampled).astype(np.int16), inside)
+    elif layer == "ais_heatmap":
+        image = _render_continuous(
+            sampled,
+            inside,
+            stops=[
+                (0.0, (25, 89, 190)),
+                (0.45, (56, 189, 248)),
+                (0.7, (251, 191, 36)),
+                (1.0, (220, 38, 38)),
+            ],
+            alpha_min=20,
+            alpha_max=185,
+        )
+    elif layer == "ice":
+        image = _render_continuous(
+            sampled,
+            inside,
+            stops=[(0.0, (147, 197, 253)), (0.5, (224, 242, 254)), (1.0, (255, 255, 255))],
+            alpha_min=20,
+            alpha_max=165,
+        )
+    elif layer == "wave":
+        image = _render_continuous(
+            sampled,
+            inside,
+            stops=[(0.0, (20, 184, 166)), (0.5, (59, 130, 246)), (1.0, (225, 29, 72))],
+            alpha_min=25,
+            alpha_max=175,
+        )
+    elif layer == "wind":
+        image = _render_continuous(
+            sampled,
+            inside,
+            stops=[(0.0, (16, 185, 129)), (0.5, (234, 179, 8)), (1.0, (124, 58, 237))],
+            alpha_min=25,
+            alpha_max=175,
+        )
+    else:
+        image = _empty_image(tile_size, tile_size)
     return _encode_png_rgba(image)

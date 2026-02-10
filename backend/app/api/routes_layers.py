@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.core.dataset import get_dataset_service, normalize_timestamp, ui_timestamp
-from app.core.render import GridBounds, parse_bbox, parse_size, render_overlay_png, tile_bbox
+from app.core.render import GridBounds, parse_bbox, parse_size, render_overlay_png, render_tile_png, tile_bbox
 from app.core.config import get_settings
 
 
@@ -67,16 +67,17 @@ def get_tile(layer: str, z: int, x: int, y: int, timestamp: str = Query(...)) ->
     settings = get_settings()
     try:
         normalized = normalize_timestamp(timestamp)
-        bbox = tile_bbox(z, x, y)
+        _ = tile_bbox(z, x, y)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    png = render_overlay_png(
+    png = render_tile_png(
         settings=settings,
         timestamp=normalized,
         layer=layer,
-        bbox=bbox,
-        width=256,
-        height=256,
+        z=z,
+        x=x,
+        y=y,
+        tile_size=256,
     )
     return Response(content=png, media_type="image/png")
