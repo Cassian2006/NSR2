@@ -217,9 +217,12 @@ def _render_continuous(
     stops: list[tuple[float, tuple[int, int, int]]],
     alpha_min: int,
     alpha_max: int,
+    value_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     image = _empty_image(sampled.shape[1], sampled.shape[0])
     finite = np.isfinite(sampled) & inside
+    if value_mask is not None and value_mask.shape == sampled.shape:
+        finite &= value_mask
     if not finite.any():
         return image
 
@@ -373,6 +376,18 @@ def render_overlay_png(
             bathy_blocked_sampled=bathy_sampled,
         )
     elif layer == "ais_heatmap":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid(
+                bathy_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
@@ -384,30 +399,70 @@ def render_overlay_png(
             ],
             alpha_min=20,
             alpha_max=185,
+            value_mask=sea_mask,
         )
     elif layer == "ice":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid(
+                bathy_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
             stops=[(0.0, (147, 197, 253)), (0.5, (224, 242, 254)), (1.0, (255, 255, 255))],
             alpha_min=20,
             alpha_max=165,
+            value_mask=sea_mask,
         )
     elif layer == "wave":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid(
+                bathy_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
             stops=[(0.0, (20, 184, 166)), (0.5, (59, 130, 246)), (1.0, (225, 29, 72))],
             alpha_min=25,
             alpha_max=175,
+            value_mask=sea_mask,
         )
     elif layer == "wind":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid(
+                bathy_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
             stops=[(0.0, (16, 185, 129)), (0.5, (234, 179, 8)), (1.0, (124, 58, 237))],
             alpha_min=25,
             alpha_max=175,
+            value_mask=sea_mask,
         )
     else:
         image = _empty_image(width, height)
@@ -458,6 +513,17 @@ def render_tile_png(
             bathy_blocked_sampled=bathy_sampled,
         )
     elif layer == "ais_heatmap":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid_from_axes(
+                bathy_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
@@ -469,30 +535,67 @@ def render_tile_png(
             ],
             alpha_min=20,
             alpha_max=185,
+            value_mask=sea_mask,
         )
     elif layer == "ice":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid_from_axes(
+                bathy_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
             stops=[(0.0, (147, 197, 253)), (0.5, (224, 242, 254)), (1.0, (255, 255, 255))],
             alpha_min=20,
             alpha_max=165,
+            value_mask=sea_mask,
         )
     elif layer == "wave":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid_from_axes(
+                bathy_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
             stops=[(0.0, (20, 184, 166)), (0.5, (59, 130, 246)), (1.0, (225, 29, 72))],
             alpha_min=25,
             alpha_max=175,
+            value_mask=sea_mask,
         )
     elif layer == "wind":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid_from_axes(
+                bathy_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
         image = _render_continuous(
             sampled,
             inside,
             stops=[(0.0, (16, 185, 129)), (0.5, (234, 179, 8)), (1.0, (124, 58, 237))],
             alpha_min=25,
             alpha_max=175,
+            value_mask=sea_mask,
         )
     else:
         image = _empty_image(tile_size, tile_size)

@@ -271,3 +271,7 @@
 - 2026-02-10T18:15:29.0964668+00:00 | Updated frontend/src/pages/ScenarioSelector.tsx dataset selector to include `all` option and request full timestamp list when selected.
 - 2026-02-10T18:15:29.0964668+00:00 | Added backend API regression test test_timestamps_all_alias_returns_full_set in backend/tests/test_api_smoke.py.
 - 2026-02-10T18:15:29.0964668+00:00 | Validation: python -m pytest -q (backend) -> 38 passed; npm run build (frontend) succeeded.
+- 2026-02-10T20:24:16.5276922+00:00 | Fixed continuous-layer land spillover in backend/app/core/render.py: ice/wave/wind/ais rendering now applies sea-only mask from bathy blocked grid (land pixels forced transparent).
+- 2026-02-10T20:24:16.5276922+00:00 | Extended backend/tests/test_render_sampling.py with test_render_continuous_respects_value_mask to guard masking behavior.
+- 2026-02-10T20:24:16.5276922+00:00 | Validation: python -m pytest -q (backend) -> 39 passed.
+- 2026-02-10T20:24:16.5276922+00:00 | Restarted backend server on http://127.0.0.1:8001 and verified /healthz returns ok.

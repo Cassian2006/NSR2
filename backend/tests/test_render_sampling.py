@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from app.core.geo import GridGeo
-from app.core.render import _sample_grid_from_axes
+from app.core.render import _render_continuous, _sample_grid_from_axes
 
 
 def test_sample_grid_bilinear_interpolates_continuous_values() -> None:
@@ -41,3 +41,20 @@ def test_sample_grid_nearest_for_discrete_layers() -> None:
     )
     assert inside[0, 0]
     assert float(sampled[0, 0]) == 10.0
+
+
+def test_render_continuous_respects_value_mask() -> None:
+    sampled = np.asarray([[0.2, 0.8]], dtype=np.float32)
+    inside = np.asarray([[True, True]], dtype=bool)
+    value_mask = np.asarray([[False, True]], dtype=bool)
+
+    image = _render_continuous(
+        sampled,
+        inside,
+        stops=[(0.0, (0, 0, 255)), (1.0, (255, 0, 0))],
+        alpha_min=20,
+        alpha_max=120,
+        value_mask=value_mask,
+    )
+    assert int(image[0, 0, 3]) == 0
+    assert int(image[0, 1, 3]) > 0
