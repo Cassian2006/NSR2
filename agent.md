@@ -310,3 +310,12 @@
 - 2026-02-10T21:01:59.5745857+00:00 | Validation: npm run build (frontend) succeeded.
 - 2026-02-10T21:03:41.1778425+00:00 | Pre-submit validation before responsive-layout push: python -m pytest -q (backend) -> 40 passed.
 - 2026-02-10T21:04:02.1954492+00:00 | Created commit e48f0cc (desktop/mobile responsive layout fix for workspace) and pushed to origin/main.
+- 2026-02-10T21:07:02.2556732+00:00 | Implemented explicit workspace layout mode control in frontend/src/pages/MapWorkspace.tsx (Auto/Desktop/Mobile) with inline pane sizing/overflow rules to bypass missing responsive utility classes and guarantee desktop horizontal layout + visible map area.
+- 2026-02-10T21:07:02.2556732+00:00 | Validation: npm run build (frontend) succeeded after workspace layout-mode update.
+- 2026-02-10T21:12:56.0012388+00:00 | Added single-service Docker deployment support: new Dockerfile (frontend build stage + FastAPI runtime stage) and .dockerignore to trim build context.
+- 2026-02-10T21:12:56.0012388+00:00 | Updated backend/app/main.py to serve frontend build as SPA when frontend/build exists, with /v1 path excluded from SPA fallback to preserve API 404 behavior.
+- 2026-02-10T21:12:56.0012388+00:00 | Added frontend_dist_root setting in backend/app/core/config.py and changed frontend API default base to same-origin /v1 in frontend/src/api/client.ts.
+- 2026-02-10T21:12:56.0012388+00:00 | Rewrote DEPLOY_RENDER.md to manual single-service Docker deployment flow for Render.
+- 2026-02-10T21:12:56.0012388+00:00 | Validation: npm run build (frontend) succeeded; python -m pytest -q (backend) -> 40 passed.
+- 2026-02-10T21:13:54.3640120+00:00 | Pre-submit validation before single-service Docker push: npm run build (frontend) succeeded.
+- 2026-02-10T21:13:54.3640120+00:00 | Pre-submit validation before single-service Docker push: python -m pytest -q (backend) -> 40 passed.

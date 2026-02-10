@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
@@ -38,6 +38,8 @@ type LayerStates = {
   wave: LayerState;
   wind: LayerState;
 };
+
+type LayoutMode = "auto" | "desktop" | "mobile";
 
 const DEFAULT_LAYERS: LayerStates = {
   bathymetry: { enabled: true, opacity: 80 },
@@ -81,7 +83,22 @@ export default function MapWorkspace() {
   const [pickTarget, setPickTarget] = useState<"start" | "goal" | null>(null);
   const [inferring, setInferring] = useState(false);
   const [inferResult, setInferResult] = useState<InferResponse | null>(null);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("auto");
+  const [isWideViewport, setIsWideViewport] = useState(false);
   const mapCaptureRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const apply = () => setIsWideViewport(mql.matches);
+    apply();
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", apply);
+      return () => mql.removeEventListener("change", apply);
+    }
+    mql.addListener(apply);
+    return () => mql.removeListener(apply);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -295,13 +312,71 @@ export default function MapWorkspace() {
   const routedGoal = plannedCoords.length ? { lat: plannedCoords[plannedCoords.length - 1][1], lon: plannedCoords[plannedCoords.length - 1][0] } : null;
   const mapStart = routedStart ?? { lat: Number.parseFloat(startLat) || 0, lon: Number.parseFloat(startLon) || 0 };
   const mapGoal = routedGoal ?? { lat: Number.parseFloat(goalLat) || 0, lon: Number.parseFloat(goalLon) || 0 };
+  const useDesktopLayout = layoutMode === "desktop" || (layoutMode === "auto" && isWideViewport);
+
+  const pageStyle: CSSProperties = {
+    minHeight: 0,
+    overflow: useDesktopLayout ? "hidden" : "auto",
+  };
+  const shellStyle: CSSProperties = {
+    display: "flex",
+    flexDirection: useDesktopLayout ? "row" : "column",
+    minHeight: "100%",
+    height: useDesktopLayout ? "100%" : "auto",
+  };
+  const leftPaneStyle: CSSProperties = useDesktopLayout
+    ? { width: 320, maxHeight: "none", minHeight: 0, borderBottomWidth: 0, borderRightWidth: 1 }
+    : { width: "100%", maxHeight: "46vh", borderBottomWidth: 1, borderRightWidth: 0 };
+  const mapPaneStyle: CSSProperties = useDesktopLayout
+    ? { minHeight: 0, height: "100%", flex: 1 }
+    : { minHeight: "56vh", height: "56vh", width: "100%", flex: "0 0 auto" };
+  const rightPaneStyle: CSSProperties = useDesktopLayout
+    ? { width: 360, maxHeight: "none", minHeight: 0, borderTopWidth: 0, borderLeftWidth: 1 }
+    : { width: "100%", maxHeight: "42vh", borderTopWidth: 1, borderLeftWidth: 0 };
+  const floatingLegendStyle: CSSProperties = {
+    position: "absolute",
+    bottom: useDesktopLayout ? 16 : 8,
+    right: useDesktopLayout ? 16 : 8,
+    maxWidth: "70vw",
+    display: useDesktopLayout ? "block" : "none",
+  };
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-gradient-to-br from-gray-50 to-slate-100 md:overflow-hidden">
-      <div className="flex h-full min-h-0 flex-col md:flex-row">
-      <div className="w-full max-h-[46vh] bg-white border-b border-purple-200 flex flex-col shadow-lg md:w-[320px] md:max-h-none md:min-h-0 md:border-b-0 md:border-r">
+    <div className="h-full overflow-auto bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
+      <div style={shellStyle}>
+      <div className="bg-white border border-purple-200 flex flex-col shadow-lg" style={leftPaneStyle}>
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-6">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="mb-2 text-xs text-slate-600">Layout</div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={layoutMode === "auto" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => setLayoutMode("auto")}
+                >
+                  Auto
+                </Button>
+                <Button
+                  type="button"
+                  variant={layoutMode === "desktop" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => setLayoutMode("desktop")}
+                >
+                  Desktop
+                </Button>
+                <Button
+                  type="button"
+                  variant={layoutMode === "mobile" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => setLayoutMode("mobile")}
+                >
+                  Mobile
+                </Button>
+              </div>
+            </div>
+
             <div>
               <h3 className="mb-3 text-purple-900 flex items-center gap-2">
                 <div className="w-1 h-5 bg-purple-600 rounded-full"></div>
@@ -479,7 +554,7 @@ export default function MapWorkspace() {
         </div>
       </div>
 
-      <div className="relative min-h-[56vh] flex-1 md:min-h-0 md:h-full" ref={mapCaptureRef}>
+      <div className="relative" style={mapPaneStyle} ref={mapCaptureRef}>
         <MapCanvas
           timestamp={timestamp}
           layers={layers}
@@ -495,7 +570,7 @@ export default function MapWorkspace() {
           </div>
         ) : null}
 
-        <div className="absolute bottom-2 right-2 hidden max-w-[70vw] sm:block md:bottom-4 md:right-4">
+        <div style={floatingLegendStyle}>
           <LegendCard
               title="Active Layers"
             items={[
@@ -512,7 +587,7 @@ export default function MapWorkspace() {
         </div>
       </div>
 
-      <div className="w-full max-h-[42vh] bg-white border-t border-border flex flex-col md:w-[360px] md:max-h-none md:min-h-0 md:border-t-0 md:border-l">
+      <div className="bg-white border border-border flex flex-col" style={rightPaneStyle}>
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-6">
             <div>

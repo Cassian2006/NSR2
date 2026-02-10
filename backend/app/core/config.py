@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ais_heatmap_root: Path = data_root / "ais_heatmap"
     gallery_root: Path = outputs_root / "gallery"
     pred_root: Path = outputs_root / "pred"
+    frontend_dist_root: Path = project_root / "frontend" / "build"
     unet_default_summary: Path = outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
     cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"

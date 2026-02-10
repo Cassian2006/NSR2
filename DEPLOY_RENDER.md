@@ -1,42 +1,40 @@
-# Render Deployment Guide
+# Render Deployment Guide (Single Service)
 
-## 1. Blueprint Deploy
-1. Push this repo to GitHub.
-2. In Render, use **New +** -> **Blueprint**.
-3. Select this repository; Render will read `render.yaml` and create:
-   - `nsr2-api` (FastAPI)
-   - `nsr2-web` (web service with `runtime: static`)
+This repo now supports deploying frontend + backend together as one Docker web service.
 
-## 2. Required Environment Variables
+## 1. Create Service in Render
+1. `New +` -> `Web Service`.
+2. Connect this GitHub repo.
+3. Render detects `Dockerfile` automatically.
 
-### Frontend (`nsr2-web`)
-- `VITE_API_BASE_URL`
-  - Blueprint now sets this from backend `RENDER_EXTERNAL_URL`.
-  - Frontend auto-normalizes and appends `/v1` when missing.
+## 2. Service Settings
+- `Environment`: `Docker`
+- `Root Directory`: leave empty (repo root)
+- `Branch`: `main`
+- `Region`: choose nearest to users
+- `Instance Type`: free/starter is fine for first run
 
-### Backend (`nsr2-api`)
-- `NSR_CORS_ORIGIN_REGEX`
-  - Suggested: `^https://.*\.onrender\.com$`
-- `NSR_CORS_ORIGINS`
-  - Add explicit frontend domain if needed.
-  - Example: `https://nsr2-web.onrender.com`
+No `Build Command` or `Start Command` needed; Dockerfile handles both.
 
-## 3. Data Path Notes
-- Current backend defaults to reading data from repo path `data/`.
-- This project usually keeps large data out of Git (`.gitignore`), so cloud deploy may not have full dataset.
-- If you want full production data on Render, set:
+## 3. Environment Variables
+Optional for same-domain deployment:
+- `NSR_CORS_ORIGIN_REGEX=^https://.*\.onrender\.com$`
+
+Usually `VITE_API_BASE_URL` is not required now:
+- frontend default is same-origin `/v1`
+- backend serves frontend static build directly
+
+## 4. Data Notes
+- The Docker context excludes `data/` and `outputs/` via `.dockerignore`.
+- Without mounted/provisioned dataset, API can start but map/planning data will be missing.
+- If you have external data storage, set:
   - `NSR_DATA_ROOT`
   - `NSR_OUTPUTS_ROOT`
-  and mount/provision data accordingly.
 
-## 4. Health and Validation
-- Backend health: `GET /healthz`
-- After deploy:
-  1. Open frontend URL.
-  2. Verify scenario/timestamp can load.
-  3. Verify map layers and route planning API calls return 200.
+## 5. Health Check
+- Path: `/healthz`
 
-## 5. Local Build Check Before Deploy
+## 6. Local Validation Before Deploy
 ```bash
 cd frontend && npm run build
 cd ../backend && python -m pytest -q
