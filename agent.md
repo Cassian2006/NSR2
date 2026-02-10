@@ -145,3 +145,8 @@
 - 2026-02-10T14:40:01.6346997Z | Trained quick U-Net baseline (default 4 epochs): outputs/train_runs/unet_quick_20260210_143810/summary.json.
 - 2026-02-10T14:40:01.6346997Z | Trained extended quick U-Net (12 epochs): outputs/train_runs/unet_quick_20260210_143847/summary.json (best loss epoch=10, val_loss=0.3896; peak caution epoch=11, val_iou_caution=0.3683).
 - 2026-02-10T14:40:16.2746577Z | Validation: python -m pytest -q in backend -> 19 passed.
+- 2026-02-10T14:53:33.0373774Z | Added backend/scripts/filter_hard_samples.py to score label difficulty (CE + caution IoU) and export filtered manifest by dropping top-K hard train samples.
+- 2026-02-10T14:53:33.0373774Z | Ran hard-sample audit using outputs/train_runs/unet_quick_20260210_131527/best.pt: exported data/processed/unet_manifest_filtered_hard10.csv and report data/processed/unet_manifest_filtered_hard10.report.json (dropped 10 train rows, 0 val rows).
+- 2026-02-10T14:53:33.0373774Z | Ran augmentation+cycle training experiments: unet_cycle_full_v1, unet_cycle_filtered_v1, unet_cycle_filtered_v2, unet_cycle_full_v2, unet_cycle_full_v3 for comparison.
+- 2026-02-10T14:53:33.0373774Z | Best balanced run so far from this sweep: outputs/train_runs/unet_cycle_full_v1/summary.json (best val_loss=0.2587, val_miou=0.7058, val_iou_caution=0.4198, val_iou_blocked=0.9206).
+- 2026-02-10T14:53:33.0373774Z | Validation: python -m pytest -q in backend -> 19 passed.
