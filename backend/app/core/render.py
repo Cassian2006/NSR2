@@ -269,6 +269,13 @@ def _render_unet(
     return image
 
 
+def _normalize_ice_sampled(sampled: np.ndarray) -> np.ndarray:
+    # In source grids, open water is often represented as NaN for ice_conc.
+    # Treat it as 0% concentration so the ice layer stays spatially continuous over sea.
+    out = np.nan_to_num(sampled.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    return np.clip(out, 0.0, 100.0)
+
+
 @lru_cache(maxsize=4)
 def _load_pack(timestamp: str, annotation_pack_root: str) -> tuple[np.ndarray, np.ndarray, list[str]]:
     pack_dir = Path(annotation_pack_root) / timestamp
@@ -414,12 +421,13 @@ def render_overlay_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
+        sampled_ice = _normalize_ice_sampled(sampled)
         image = _render_continuous(
-            sampled,
+            sampled_ice,
             inside,
             stops=[(0.0, (147, 197, 253)), (0.5, (224, 242, 254)), (1.0, (255, 255, 255))],
-            alpha_min=20,
-            alpha_max=165,
+            alpha_min=35,
+            alpha_max=180,
             value_mask=sea_mask,
         )
     elif layer == "wave":
@@ -549,12 +557,13 @@ def render_tile_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
+        sampled_ice = _normalize_ice_sampled(sampled)
         image = _render_continuous(
-            sampled,
+            sampled_ice,
             inside,
             stops=[(0.0, (147, 197, 253)), (0.5, (224, 242, 254)), (1.0, (255, 255, 255))],
-            alpha_min=20,
-            alpha_max=165,
+            alpha_min=35,
+            alpha_max=180,
             value_mask=sea_mask,
         )
     elif layer == "wave":

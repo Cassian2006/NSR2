@@ -183,14 +183,14 @@ export default function ExportReport() {
   };
 
   return (
-    <div className="h-full overflow-auto bg-gray-50">
-      <div className="max-w-7xl mx-auto p-8">
-        <div className="mb-6 flex items-center justify-between">
+    <div className="min-h-full bg-gray-50">
+      <div className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="mb-1">{t("export.title")}</h1>
             <p className="text-muted-foreground">{t("export.subtitle")}</p>
           </div>
-          <Button variant="outline" className="gap-2" onClick={loadList} disabled={loadingList}>
+          <Button variant="outline" className="w-full gap-2 sm:w-auto" onClick={loadList} disabled={loadingList}>
             <RefreshCw className={`size-4 ${loadingList ? "animate-spin" : ""}`} />
             {t("export.refresh")}
           </Button>
@@ -224,7 +224,7 @@ export default function ExportReport() {
                           <div className="text-xs text-muted-foreground">result: {getResultSummary(item)}</div>
                         </button>
                       </HoverCardTrigger>
-                      <HoverCardContent className="w-96 space-y-2">
+                      <HoverCardContent className="w-[min(24rem,80vw)] space-y-2">
                         <div className="text-sm font-semibold">Route Plan Detail</div>
                         <div className="text-xs text-muted-foreground">action</div>
                         <div className="text-xs font-mono">{getActionSummary(item)}</div>
@@ -262,22 +262,22 @@ export default function ExportReport() {
                 </div>
               ) : (
                 <>
-                  <div className="grid gap-3 md:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                     <StatCard label={t("summary.distance")} value={Number(selectedItem.distance_km ?? 0).toFixed(1)} unit="km" />
                     <StatCard label={t("summary.caution")} value={cautionPct.toFixed(1)} unit="%" variant="warning" />
                     <StatCard label={t("workspace.corridorBias")} value={Number(selectedItem.corridor_bias ?? 0).toFixed(2)} />
                     <StatCard label="Model" value={String(selectedItem.model_version ?? "unet_v1")} />
                   </div>
 
-                  <div className="flex items-center justify-between rounded-lg border bg-white p-3">
+                  <div className="flex flex-col gap-3 rounded-lg border bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="text-sm text-muted-foreground">{t("export.backtest")}</div>
-                    <Button onClick={handleRunBacktest} variant="outline" disabled={evaluating} className="gap-2">
+                    <Button onClick={handleRunBacktest} variant="outline" disabled={evaluating} className="w-full gap-2 sm:w-auto">
                       {evaluating ? t("export.backtest.loading") : t("export.backtest.run")}
                     </Button>
                   </div>
 
                   {backtest ? (
-                    <div className="grid gap-3 md:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                       <StatCard label="Top10 Hit" value={(backtest.top10pct_hit_rate * 100).toFixed(1)} unit="%" />
                       <StatCard label="Top25 Hit" value={(backtest.top25pct_hit_rate * 100).toFixed(1)} unit="%" />
                       <StatCard label="Align (0-1)" value={backtest.alignment_norm_0_1.toFixed(3)} />
@@ -285,7 +285,7 @@ export default function ExportReport() {
                     </div>
                   ) : null}
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border bg-white p-3 text-sm">
                       <div className="mb-2 text-muted-foreground">{t("workspace.startPoint")}</div>
                       <div className="font-mono">
@@ -328,19 +328,19 @@ export default function ExportReport() {
                   <Separator />
 
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={handleDownloadRoute} className="gap-2">
+                    <Button onClick={handleDownloadRoute} className="w-full gap-2 sm:w-auto">
                       <FileJson className="size-4" />
                       {t("export.downloadRoute")}
                     </Button>
-                    <Button onClick={handleDownloadReport} variant="outline" className="gap-2">
+                    <Button onClick={handleDownloadReport} variant="outline" className="w-full gap-2 sm:w-auto">
                       <Download className="size-4" />
                       {t("export.downloadReport")}
                     </Button>
-                    <Button onClick={handleDownloadImage} variant="outline" className="gap-2">
+                    <Button onClick={handleDownloadImage} variant="outline" className="w-full gap-2 sm:w-auto">
                       <Image className="size-4" />
                       {t("export.downloadImage")}
                     </Button>
-                    <Button onClick={handleDelete} variant="destructive" className="gap-2">
+                    <Button onClick={handleDelete} variant="destructive" className="w-full gap-2 sm:w-auto">
                       <Trash2 className="size-4" />
                       {t("export.delete")}
                     </Button>

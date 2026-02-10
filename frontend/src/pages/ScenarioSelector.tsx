@@ -90,7 +90,7 @@ export default function ScenarioSelector() {
 
   return (
     <div className="h-full overflow-auto bg-gradient-to-br from-blue-50 via-gray-50 to-indigo-50">
-      <div className="max-w-6xl mx-auto p-12">
+      <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-12">
         <div className="mb-8">
           <h1 className="mb-2 text-blue-900">{t("scenario.title")}</h1>
           <p className="text-muted-foreground">{t("scenario.subtitle")}</p>
@@ -103,7 +103,7 @@ export default function ScenarioSelector() {
               <CardDescription>{t("scenario.config.desc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="month">{t("scenario.month")}</Label>
                   <Select value={selectedMonth} onValueChange={setSelectedMonth}>

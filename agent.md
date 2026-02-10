@@ -280,3 +280,15 @@
 - 2026-02-10T20:29:48.0550141+00:00 | Replaced top-left header icon in frontend/src/components/Layout.tsx with the new cropped logo image.
 - 2026-02-10T20:29:48.0550141+00:00 | Updated frontend/index.html to use /favicon.png as application icon.
 - 2026-02-10T20:29:48.0550141+00:00 | Validation: npm run build (frontend) succeeded; python -m pytest -q (backend) -> 39 passed.
+- 2026-02-10T20:35:09.6760197+00:00 | Mobile adaptation pass: improved small-screen layout/scroll behavior in frontend/src/components/Layout.tsx, frontend/src/pages/ScenarioSelector.tsx, frontend/src/pages/MapWorkspace.tsx, and frontend/src/pages/ExportReport.tsx (responsive stacking, panel sizing, mobile-safe controls/buttons).
+- 2026-02-10T20:35:09.6760197+00:00 | Added Render deployment blueprint file render.yaml (FastAPI web service + static frontend service with SPA rewrite and env var placeholders).
+- 2026-02-10T20:35:09.6760197+00:00 | Added DEPLOY_RENDER.md with step-by-step Render deployment and required env var/data-path notes.
+- 2026-02-10T20:35:09.6760197+00:00 | Updated .gitignore to ignore frontend/.env.local and frontend/.env.*.local.
+- 2026-02-10T20:35:09.6760197+00:00 | Validation: npm run build (frontend) succeeded.
+- 2026-02-10T20:35:09.6760197+00:00 | Validation: python -m pytest -q (backend) -> 39 passed.
+- 2026-02-10T20:37:55.3755409+00:00 | Investigated ice-layer visibility issue: measured annotation_pack ice channel coverage and found many timestamps contain NaN over open sea, causing transparent rendering in current pipeline.
+- 2026-02-10T20:37:55.3755409+00:00 | Updated backend/app/core/render.py ice rendering path: added _normalize_ice_sampled() to map NaN/inf/negative to 0 (clear water), and increased low-end ice alpha (35-180) for better map visibility at max opacity.
+- 2026-02-10T20:37:55.3755409+00:00 | Added regression test backend/tests/test_render_sampling.py::test_normalize_ice_sampled_fills_non_finite_as_zero.
+- 2026-02-10T20:37:55.3755409+00:00 | Validation: python -m pytest -q (backend) -> 40 passed.
+- 2026-02-10T20:41:10.2810133+00:00 | Pre-submit validation before GitHub push: npm run build (frontend) succeeded.
+- 2026-02-10T20:41:10.2810133+00:00 | Pre-submit validation before GitHub push: python -m pytest -q (backend) -> 40 passed.

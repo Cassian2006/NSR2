@@ -297,8 +297,9 @@ export default function MapWorkspace() {
   const mapGoal = routedGoal ?? { lat: Number.parseFloat(goalLat) || 0, lon: Number.parseFloat(goalLon) || 0 };
 
   return (
-    <div className="h-full min-h-0 overflow-hidden flex bg-gradient-to-br from-gray-50 to-slate-100">
-      <div className="w-[320px] min-h-0 bg-white border-r border-purple-200 flex flex-col shadow-lg">
+    <div className="h-full min-h-0 overflow-auto bg-gradient-to-br from-gray-50 to-slate-100 lg:overflow-hidden">
+      <div className="flex min-h-full flex-col lg:flex-row">
+      <div className="w-full max-h-[46vh] bg-white border-b border-purple-200 flex flex-col shadow-lg lg:w-[320px] lg:max-h-none lg:min-h-0 lg:border-b-0 lg:border-r">
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-6">
             <div>
@@ -478,7 +479,7 @@ export default function MapWorkspace() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 relative" ref={mapCaptureRef}>
+      <div className="relative min-h-[52vh] flex-1 lg:min-h-0" ref={mapCaptureRef}>
         <MapCanvas
           timestamp={timestamp}
           layers={layers}
@@ -494,7 +495,7 @@ export default function MapWorkspace() {
           </div>
         ) : null}
 
-        <div className="absolute bottom-4 right-4">
+        <div className="absolute bottom-2 right-2 hidden max-w-[70vw] sm:block lg:bottom-4 lg:right-4">
           <LegendCard
               title="Active Layers"
             items={[
@@ -511,18 +512,18 @@ export default function MapWorkspace() {
         </div>
       </div>
 
-      <div className="w-[360px] min-h-0 bg-white border-l border-border flex flex-col">
+      <div className="w-full max-h-[42vh] bg-white border-t border-border flex flex-col lg:w-[360px] lg:max-h-none lg:min-h-0 lg:border-t-0 lg:border-l">
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-6">
             <div>
               <h3 className="mb-3">{t("summary.title")}</h3>
               {routeResult ? (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <StatCard label={t("summary.distance")} value={routeSummary.distanceKm.toFixed(1)} unit="km" />
                     <StatCard label={t("summary.distance")} value={routeSummary.distanceNm.toFixed(1)} unit="nm" />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <StatCard label={t("summary.safe")} value={routeSummary.safePct} unit="%" variant="success" />
                     <StatCard label={t("summary.caution")} value={routeSummary.cautionPct} unit="%" variant="warning" />
                   </div>
@@ -581,6 +582,7 @@ export default function MapWorkspace() {
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from app.core.geo import GridGeo
-from app.core.render import _render_continuous, _sample_grid_from_axes
+from app.core.render import _normalize_ice_sampled, _render_continuous, _sample_grid_from_axes
 
 
 def test_sample_grid_bilinear_interpolates_continuous_values() -> None:
@@ -58,3 +58,13 @@ def test_render_continuous_respects_value_mask() -> None:
     )
     assert int(image[0, 0, 3]) == 0
     assert int(image[0, 1, 3]) > 0
+
+
+def test_normalize_ice_sampled_fills_non_finite_as_zero() -> None:
+    sampled = np.asarray([[np.nan, 12.0, -4.0, np.inf]], dtype=np.float32)
+    out = _normalize_ice_sampled(sampled)
+    assert np.all(np.isfinite(out))
+    assert np.isclose(float(out[0, 0]), 0.0)
+    assert np.isclose(float(out[0, 1]), 12.0)
+    assert np.isclose(float(out[0, 2]), 0.0)
+    assert np.isclose(float(out[0, 3]), 0.0)
