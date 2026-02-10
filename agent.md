@@ -157,3 +157,9 @@
 - 2026-02-10T15:10:30.9966684Z | Finalized partial review merge for active_20260210_145951 with --merge-with-suggest: merged=15, suggest_only=5, human_only=0.
 - 2026-02-10T15:10:30.9966684Z | Rebuilt manifest after merge: data/processed/unet_manifest_labeled.csv -> rows=152 (train=109, val=43, val_month=202408).
 - 2026-02-10T15:10:30.9966684Z | Trained run outputs/train_runs/unet_cycle_full_v1_r2 and outputs/train_runs/unet_cycle_full_v1_r2_focus for post-merge evaluation.
+- 2026-02-10T15:14:17.5201507Z | User selected option 2: prepared missing-5 rapid review set for active_20260210_145951 at labelme_active_topk/review_missing5_landmask_ai and review_missing5_raw, with mapping_missing5.csv.
+- 2026-02-10T15:14:17.5201507Z | Missing ranks/timestamps: 8(2024-07-22_06), 11(2024-07-20_12), 17(2024-07-22_00), 19(2024-07-25_12), 20(2024-07-30_06). Launched Labelme on review_missing5_landmask_ai.
+- 2026-02-10T15:23:09.8742288Z | Received user completion for missing-5 review; copied newly provided review JSONs into active_20260210_145951/only20_landmask_ai (4 new: active_008/017/019/020).
+- 2026-02-10T15:23:09.8742288Z | Re-finalized active_20260210_145951 with full mapping: merged=19, suggest_only=1 (remaining missing review: active_011 / 2024-07-20_12).
+- 2026-02-10T15:23:09.8742288Z | Rebuilt manifest post-merge: data/processed/unet_manifest_labeled.csv -> rows=152 (train=109, val=43).
+- 2026-02-10T15:23:09.8742288Z | Retrain comparison runs completed: outputs/train_runs/unet_cycle_full_v1_r3 and outputs/train_runs/unet_cycle_full_v1_r3_focus; both underperform prior bests (v1 and v1_r2_focus).
