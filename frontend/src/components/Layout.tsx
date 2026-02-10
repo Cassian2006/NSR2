@@ -22,8 +22,8 @@ export default function Layout() {
     <div className="min-h-dvh flex flex-col bg-background">
       {/* Top Navigation Bar */}
       <header className="border-b border-border bg-gradient-to-r from-blue-50 via-white to-indigo-50 px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-3 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-8">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-8">
           <Link to="/" className="flex items-center gap-2">
             <div className="size-8 rounded-lg border border-blue-200 bg-white p-0.5 shadow-sm">
               <img src={appLogo} alt="NSR logo" className="h-full w-full rounded-md object-cover" />
@@ -62,7 +62,7 @@ export default function Layout() {
           </nav>
         </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end lg:gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end md:gap-3">
             <LanguageSwitch />
           
             <div className="flex items-center gap-2">

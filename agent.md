@@ -305,3 +305,7 @@
 - 2026-02-10T21:00:00.8392143+00:00 | Updated DEPLOY_RENDER.md to reflect fromService-based API URL wiring and /v1 auto-normalization.
 - 2026-02-10T21:00:30.4467450+00:00 | Validation after Blueprint-compat hardening: npm run build (frontend) succeeded.
 - 2026-02-10T21:00:30.4467450+00:00 | Validation after Blueprint-compat hardening: python -m pytest -q (backend) -> 40 passed.
+- 2026-02-10T21:01:59.5745857+00:00 | Fixed workspace responsive behavior: switched desktop breakpoint from lg->md and repaired map height chain (h-full/min-h-0) in frontend/src/pages/MapWorkspace.tsx so desktop uses horizontal layout and map container renders correctly.
+- 2026-02-10T21:01:59.5745857+00:00 | Updated top navigation responsive breakpoint from lg->md in frontend/src/components/Layout.tsx to avoid unintended mobile-style stacking on common desktop widths.
+- 2026-02-10T21:01:59.5745857+00:00 | Validation: npm run build (frontend) succeeded.
+- 2026-02-10T21:03:41.1778425+00:00 | Pre-submit validation before responsive-layout push: python -m pytest -q (backend) -> 40 passed.
