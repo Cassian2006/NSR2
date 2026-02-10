@@ -214,3 +214,7 @@
 - 2026-02-10T16:32:32.3868028Z | Upgraded route smoothing in backend/app/planning/router.py from direction-compression to obstacle-aware line-of-sight simplification using Bresenham visibility checks (_line_of_sight + _smooth_cells_los).
 - 2026-02-10T16:32:32.3868028Z | Added smoothing unit tests in backend/tests/test_router_smoothing.py covering obstacle intersection, aggressive simplification without obstacles, and turn preservation when shortcuts are blocked.
 - 2026-02-10T16:32:32.3868028Z | Validation: python -m pytest -q (backend) -> 29 passed, 1 warning; npm run build (frontend) succeeded.
+- 2026-02-10T16:38:18.6794975Z | Frontend bundle optimization: enabled route-level lazy loading in frontend/src/routes.ts and RouterProvider fallback in frontend/src/App.tsx.
+- 2026-02-10T16:38:18.6794975Z | Moved html2canvas to dynamic import in frontend/src/pages/MapWorkspace.tsx so capture logic is loaded on demand after planning.
+- 2026-02-10T16:38:18.6794975Z | Added manual chunk strategy in frontend/vite.config.ts to split map-vendor, capture-vendor, router-vendor, ui-vendor, and generic vendor bundles.
+- 2026-02-10T16:38:18.6794975Z | Validation: npm run build (frontend) succeeded with split chunks (largest single chunk reduced from previous monolith); python -m pytest -q (backend) -> 29 passed, 1 warning.

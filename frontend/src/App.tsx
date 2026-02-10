@@ -6,7 +6,14 @@ import { LanguageProvider } from './contexts/LanguageContext';
 export default function App() {
   return (
     <LanguageProvider>
-      <RouterProvider router={router} />
+      <RouterProvider
+        router={router}
+        fallbackElement={
+          <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
+            Loading page...
+          </div>
+        }
+      />
       <Toaster />
     </LanguageProvider>
   );

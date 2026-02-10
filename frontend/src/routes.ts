@@ -1,17 +1,13 @@
 import { createBrowserRouter } from "react-router";
-import ScenarioSelector from "./pages/ScenarioSelector";
-import MapWorkspace from "./pages/MapWorkspace";
-import ExportReport from "./pages/ExportReport";
-import Layout from "./components/Layout";
 
 export const router = createBrowserRouter([
   {
     path: "/",
-    Component: Layout,
+    lazy: async () => ({ Component: (await import("./components/Layout")).default }),
     children: [
-      { index: true, Component: ScenarioSelector },
-      { path: "workspace", Component: MapWorkspace },
-      { path: "export", Component: ExportReport },
+      { index: true, lazy: async () => ({ Component: (await import("./pages/ScenarioSelector")).default }) },
+      { path: "workspace", lazy: async () => ({ Component: (await import("./pages/MapWorkspace")).default }) },
+      { path: "export", lazy: async () => ({ Component: (await import("./pages/ExportReport")).default }) },
     ],
   },
 ]);

@@ -52,6 +52,18 @@
     build: {
       target: 'esnext',
       outDir: 'build',
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('leaflet') || id.includes('react-leaflet')) return 'map-vendor';
+            if (id.includes('html2canvas')) return 'capture-vendor';
+            if (id.includes('react-router')) return 'router-vendor';
+            if (id.includes('@radix-ui') || id.includes('lucide-react') || id.includes('sonner')) return 'ui-vendor';
+            return 'vendor';
+          },
+        },
+      },
     },
     server: {
       port: 3000,

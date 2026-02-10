@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
-import html2canvas from "html2canvas";
 
 import { getLayers, getTimestamps, planRoute, runInference, uploadGalleryImage, type InferResponse, type RoutePlanResponse } from "../api/client";
 import CoordinateInput from "../components/CoordinateInput";
@@ -168,6 +167,7 @@ export default function MapWorkspace() {
   const captureAndUploadGalleryImage = useCallback(async (galleryId: string) => {
     if (!mapCaptureRef.current) return;
     try {
+      const { default: html2canvas } = await import("html2canvas");
       await new Promise((resolve) => setTimeout(resolve, 450));
       const canvas = await html2canvas(mapCaptureRef.current, {
         useCORS: true,
