@@ -124,3 +124,7 @@
 - 2026-02-10T13:08:08+00:00 | Finalized active round active_20260210_122544 review labels into annotation_pack: merged=15, suggest_only=5.
 - 2026-02-10T13:08:08+00:00 | Rebuilt labeled manifest after merge: data/processed/unet_manifest_labeled.csv -> rows=92 (train=71, val=21, val_month=202408).
 - 2026-02-10T13:08:08+00:00 | Retrained quick U-Net on 92 labels: outputs/train_runs/unet_quick_20260210_130711/summary.json (best val_loss=0.3167, val_miou=0.7220, val_iou_caution=0.4313, val_iou_blocked=0.9325; peak caution epoch=9 -> 0.4637).
+- 2026-02-10T13:11:33+00:00 | Started new active-learning round: active_20260210_131016 (top-20), generated review overlays at outputs/active_learning/active_20260210_131016/labelme_active_topk/review_overlay20, and restarted Labelme on review folder.
+- 2026-02-10T13:16:27+00:00 | Finalized active round active_20260210_131016 review labels into annotation_pack: merged=9, suggest_only=11.
+- 2026-02-10T13:16:27+00:00 | Rebuilt labeled manifest after merge: data/processed/unet_manifest_labeled.csv -> rows=112 (train=80, val=32, val_month=202408).
+- 2026-02-10T13:16:27+00:00 | Retrained quick U-Net on 112 labels: outputs/train_runs/unet_quick_20260210_131527/summary.json (best val_loss=0.3352, val_miou=0.6629, val_iou_caution=0.4300, val_iou_blocked=0.8681; peak caution epoch=3 -> 0.4816).
