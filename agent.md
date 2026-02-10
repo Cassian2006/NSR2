@@ -222,3 +222,6 @@
 - 2026-02-10T16:46:21.3082417Z | Replaced mixed i18n setup by rewriting frontend/src/contexts/LanguageContext.tsx with clean EN/ZH dictionaries for currently used keys, removing prior garbled zh text and react-i18next mismatch.
 - 2026-02-10T16:46:21.3082417Z | Updated frontend map/gallery pages and components to consume translated keys and normalized error messages (MapWorkspace, ExportReport, CoordinateInput, MapCanvas).
 - 2026-02-10T16:46:21.3082417Z | Validation: npm run build (frontend) succeeded with split chunks; python -m pytest -q (backend) -> 29 passed, 1 warning.
+- 2026-02-10T16:49:36.9083172Z | Added backend/app/core/errors.py with global JSON error handlers for HTTP, validation, and unhandled exceptions (stable payload: code/status/message/detail).
+- 2026-02-10T16:49:36.9083172Z | Wired install_error_handlers(app) in backend/app/main.py so all API routes emit standardized error responses.
+- 2026-02-10T16:49:36.9083172Z | Extended backend/tests/test_api_smoke.py with test_error_payload_shape to guard 422 payload contract.

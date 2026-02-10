@@ -157,3 +157,13 @@ def test_infer_persists_file(client: TestClient) -> None:
     payload = infer_resp.json()
     output_file = Path(payload["output_file"])
     assert output_file.exists()
+
+
+def test_error_payload_shape(client: TestClient) -> None:
+    bad = client.get("/v1/layers", params={"timestamp": "bad-ts"})
+    assert bad.status_code == 422
+    payload = bad.json()
+    assert payload["code"] in {"http_error", "validation_error"}
+    assert payload["status"] == 422
+    assert isinstance(payload["message"], str)
+    assert "detail" in payload

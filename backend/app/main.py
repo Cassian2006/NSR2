@@ -10,6 +10,7 @@ from app.api.routes_layers import router as layers_router
 from app.api.routes_plan import router as plan_router
 from app.core.config import get_settings
 from app.core.dataset import get_dataset_service
+from app.core.errors import install_error_handlers
 
 
 def create_app() -> FastAPI:
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    install_error_handlers(app)
 
     app.include_router(layers_router, prefix="/v1")
     app.include_router(infer_router, prefix="/v1")
