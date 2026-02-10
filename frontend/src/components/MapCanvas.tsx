@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CircleMarker,
-  ImageOverlay,
   MapContainer,
+  Pane,
   Polyline,
   TileLayer,
-  useMap,
   useMapEvents,
 } from "react-leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
@@ -33,18 +32,13 @@ interface MapCanvasProps {
   onMapClick?: (lat: number, lon: number) => void;
 }
 
-type OverlayState = {
-  url: string;
-  bounds: LatLngBoundsExpression;
-};
-
 const API_ORIGIN = getApiOrigin();
 const INITIAL_BOUNDS: LatLngBoundsExpression = [
   [66, -180],
   [86, 180],
 ];
 
-function OverlayLayer({
+function RasterTileLayer({
   layerId,
   enabled,
   opacity,
@@ -57,47 +51,25 @@ function OverlayLayer({
   timestamp: string;
   zIndex: number;
 }) {
-  const map = useMap();
-  const [overlay, setOverlay] = useState<OverlayState | null>(null);
-
-  const refresh = useCallback(() => {
-    if (!enabled || !timestamp) {
-      setOverlay(null);
-      return;
-    }
-    const b = map.getBounds();
-    const size = map.getSize();
-    const width = Math.max(256, Math.round(size.x));
-    const height = Math.max(256, Math.round(size.y));
-    const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(6)).join(",");
-    const url =
-      `${API_ORIGIN}/v1/overlay/${layerId}.png` +
-      `?timestamp=${encodeURIComponent(timestamp)}` +
-      `&bbox=${encodeURIComponent(bbox)}` +
-      `&size=${width},${height}` +
-      `&v=${encodeURIComponent(`${timestamp}-${b.toBBoxString()}-${width}x${height}`)}`;
-    setOverlay({
-      url,
-      bounds: [
-        [b.getSouth(), b.getWest()],
-        [b.getNorth(), b.getEast()],
-      ],
-    });
-  }, [enabled, layerId, map, timestamp]);
-
-  useMapEvents({
-    moveend: refresh,
-    zoomend: refresh,
-    resize: refresh,
-  });
-
-  // Trigger first load and timestamp/layer changes.
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  if (!enabled || !overlay) return null;
-  return <ImageOverlay url={overlay.url} bounds={overlay.bounds} opacity={Math.max(0, Math.min(1, opacity / 100))} zIndex={zIndex} />;
+  if (!enabled || !timestamp) return null;
+  const paneName = `overlay-${layerId}`;
+  const url = `${API_ORIGIN}/v1/tiles/${layerId}/{z}/{x}/{y}.png?timestamp=${encodeURIComponent(timestamp)}&v=${encodeURIComponent(
+    timestamp
+  )}`;
+  return (
+    <Pane name={paneName} style={{ zIndex }}>
+      <TileLayer
+        key={`${layerId}-${timestamp}`}
+        pane={paneName}
+        url={url}
+        opacity={Math.max(0, Math.min(1, opacity / 100))}
+        tileSize={256}
+        noWrap
+        updateWhenIdle
+        crossOrigin="anonymous"
+      />
+    </Pane>
+  );
 }
 
 function MapEvents({
@@ -138,6 +110,7 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"
+          noWrap
         />
 
         <MapEvents
@@ -147,12 +120,12 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
           }}
         />
 
-        <OverlayLayer layerId="bathy" enabled={layers.bathymetry.enabled} opacity={layers.bathymetry.opacity} timestamp={timestamp} zIndex={300} />
-        <OverlayLayer layerId="ice" enabled={layers.ice.enabled} opacity={layers.ice.opacity} timestamp={timestamp} zIndex={320} />
-        <OverlayLayer layerId="wave" enabled={layers.wave.enabled} opacity={layers.wave.opacity} timestamp={timestamp} zIndex={330} />
-        <OverlayLayer layerId="wind" enabled={layers.wind.enabled} opacity={layers.wind.opacity} timestamp={timestamp} zIndex={340} />
-        <OverlayLayer layerId="ais_heatmap" enabled={layers.aisHeatmap.enabled} opacity={layers.aisHeatmap.opacity} timestamp={timestamp} zIndex={360} />
-        <OverlayLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} zIndex={380} />
+        <RasterTileLayer layerId="bathy" enabled={layers.bathymetry.enabled} opacity={layers.bathymetry.opacity} timestamp={timestamp} zIndex={300} />
+        <RasterTileLayer layerId="ice" enabled={layers.ice.enabled} opacity={layers.ice.opacity} timestamp={timestamp} zIndex={320} />
+        <RasterTileLayer layerId="wave" enabled={layers.wave.enabled} opacity={layers.wave.opacity} timestamp={timestamp} zIndex={330} />
+        <RasterTileLayer layerId="wind" enabled={layers.wind.enabled} opacity={layers.wind.opacity} timestamp={timestamp} zIndex={340} />
+        <RasterTileLayer layerId="ais_heatmap" enabled={layers.aisHeatmap.enabled} opacity={layers.aisHeatmap.opacity} timestamp={timestamp} zIndex={360} />
+        <RasterTileLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} zIndex={380} />
 
         {showRoute && routeLatLng.length >= 2 ? (
           <Polyline positions={routeLatLng} pathOptions={{ color: "#1e40af", weight: 4, opacity: 0.95 }} />

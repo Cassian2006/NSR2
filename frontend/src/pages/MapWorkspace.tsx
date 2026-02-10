@@ -21,7 +21,6 @@ import StatCard from "../components/StatCard";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Label } from "../components/ui/label";
-import { ScrollArea } from "../components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Slider } from "../components/ui/slider";
 import { useLanguage } from "../contexts/LanguageContext";
@@ -292,7 +291,7 @@ export default function MapWorkspace() {
   return (
     <div className="h-full min-h-0 overflow-hidden flex bg-gradient-to-br from-gray-50 to-slate-100">
       <div className="w-[320px] min-h-0 bg-white border-r border-purple-200 flex flex-col shadow-lg">
-        <ScrollArea className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-6">
             <div>
               <h3 className="mb-3 text-purple-900 flex items-center gap-2">
@@ -468,7 +467,7 @@ export default function MapWorkspace() {
               </Card>
             </div>
           </div>
-        </ScrollArea>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 relative" ref={mapCaptureRef}>
@@ -505,7 +504,7 @@ export default function MapWorkspace() {
       </div>
 
       <div className="w-[360px] min-h-0 bg-white border-l border-border flex flex-col">
-        <ScrollArea className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-6">
             <div>
               <h3 className="mb-3">{t("summary.title")}</h3>
@@ -573,7 +572,7 @@ export default function MapWorkspace() {
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   );

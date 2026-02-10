@@ -238,3 +238,6 @@
 - 2026-02-10T17:35:55.3960624Z | Added backend CORS regression test test_cors_allows_local_dev_origin in backend/tests/test_api_smoke.py (Origin 127.0.0.1:5178 receives access-control-allow-origin echo).
 - 2026-02-10T17:35:55.3960624Z | Fixed workspace sidebar scroll behavior by adding min-h-0/overflow constraints to pane containers and ScrollArea roots in frontend/src/pages/MapWorkspace.tsx.
 - 2026-02-10T17:35:55.3960624Z | Validation: backend pytest 32 passed; frontend build succeeded; runtime verification: /v1/datasets and /v1/overlay now return CORS headers for Origin http://127.0.0.1:5178.
+- 2026-02-10T17:43:52.8381445Z | Reworked frontend map overlay rendering in frontend/src/components/MapCanvas.tsx from viewport ImageOverlay mode to georeferenced XYZ tile layers (/v1/tiles/{layer}/{z}/{x}/{y}.png), with per-layer panes/z-index and timestamp cache key, to improve basemap alignment and zoom behavior.
+- 2026-02-10T17:43:52.8381445Z | Replaced workspace side-panel ScrollArea usage with native overflow containers in frontend/src/pages/MapWorkspace.tsx to guarantee vertical scrolling to the planning controls and route button.
+- 2026-02-10T17:43:52.8381445Z | Validation: npm run build (frontend) succeeded; python -m pytest -q (backend) -> 32 passed.
