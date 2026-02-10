@@ -3,9 +3,13 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
+from app.core.dataset import normalize_timestamp
+from app.core.geo import load_grid_geo
 from app.main import app
 
 
@@ -122,6 +126,53 @@ def test_route_plan_modes(client: TestClient) -> None:
     explain = resp.json()["explain"]
     assert explain["caution_mode"] == "minimize"
     assert explain["effective_caution_penalty"] > 0
+
+
+def test_route_plan_is_stable_and_stays_out_of_blocked(client: TestClient) -> None:
+    ts_ui = _pick_timestamp(client)
+    ts = normalize_timestamp(ts_ui)
+    payload = {
+        "timestamp": ts_ui,
+        "start": {"lat": 78.2467, "lon": 15.4650},
+        "goal": {"lat": 81.5074, "lon": 58.3811},
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "tie_breaker",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+        },
+    }
+
+    first = client.post("/v1/route/plan", json=payload)
+    second = client.post("/v1/route/plan", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_data = first.json()
+    second_data = second.json()
+
+    first_coords = first_data["route_geojson"]["geometry"]["coordinates"]
+    second_coords = second_data["route_geojson"]["geometry"]["coordinates"]
+    assert first_coords == second_coords
+    assert first_data["explain"]["distance_km"] == second_data["explain"]["distance_km"]
+    assert first_data["explain"]["caution_len_km"] == second_data["explain"]["caution_len_km"]
+
+    settings = get_settings()
+    blocked_bathy_path = settings.annotation_pack_root / ts / "blocked_mask.npy"
+    assert blocked_bathy_path.exists()
+    blocked_bathy = np.load(blocked_bathy_path).astype(np.uint8) > 0
+
+    pred_path = settings.pred_root / "unet_v1" / f"{ts}.npy"
+    assert pred_path.exists()
+    unet_pred = np.load(pred_path).astype(np.uint8)
+    assert unet_pred.shape == blocked_bathy.shape
+    fused_blocked = blocked_bathy | (unet_pred == 2)
+
+    geo = load_grid_geo(settings=settings, timestamp=ts, shape=blocked_bathy.shape)
+    for lon, lat in first_coords:
+        r, c, inside = geo.latlon_to_rc(float(lat), float(lon))
+        assert inside
+        assert not bool(fused_blocked[r, c])
 
 
 def test_eval_ais_backtest(client: TestClient) -> None:
