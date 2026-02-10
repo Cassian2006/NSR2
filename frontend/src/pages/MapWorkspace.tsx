@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
 
@@ -51,6 +51,7 @@ const AVAILABILITY_DEFAULT = {
 
 export default function MapWorkspace() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryTimestamp = searchParams.get("timestamp") ?? "";
 
@@ -156,6 +157,11 @@ export default function MapWorkspace() {
     }),
     [routeMetrics]
   );
+
+  const handleOpenLatestGallery = () => {
+    if (!routeResult?.gallery_id) return;
+    navigate(`/export?gallery=${encodeURIComponent(routeResult.gallery_id)}`);
+  };
 
   const handlePlanRoute = async () => {
     const startLatNum = Number.parseFloat(startLat);
@@ -482,6 +488,11 @@ export default function MapWorkspace() {
                       <div className="text-xs">Route avoids all BLOCKED zones</div>
                     </div>
                   </div>
+                  {routeResult.gallery_id ? (
+                    <Button variant="outline" className="w-full" onClick={handleOpenLatestGallery}>
+                      Open In Gallery ({routeResult.gallery_id})
+                    </Button>
+                  ) : null}
                 </div>
               ) : (
                 <div className="p-8 text-center border-2 border-dashed border-border rounded-lg">

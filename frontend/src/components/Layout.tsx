@@ -79,10 +79,12 @@ export default function Layout() {
             </Select>
           </div>
 
-          <Button size="sm" className="gap-2 bg-green-600 hover:bg-green-700">
-            <Download className="size-4" />
-            {t("nav.export.btn")}
-          </Button>
+          <Link to="/export">
+            <Button size="sm" className="gap-2 bg-green-600 hover:bg-green-700">
+              <Download className="size-4" />
+              {t("nav.export.btn")}
+            </Button>
+          </Link>
         </div>
       </header>
 

@@ -69,6 +69,12 @@ def test_route_plan_and_gallery(client: TestClient) -> None:
     assert gallery_resp.status_code == 200
     assert isinstance(gallery_resp.json().get("items", []), list)
 
+    image_resp = client.get(f"/v1/gallery/{plan['gallery_id']}/image.png")
+    assert image_resp.status_code == 200
+    assert image_resp.headers["content-type"] == "image/png"
+    # Non-trivial preview image should be larger than placeholder 1x1 PNG.
+    assert len(image_resp.content) > 500
+
 
 def test_infer_persists_file(client: TestClient) -> None:
     ts = _pick_timestamp(client)

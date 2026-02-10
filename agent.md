@@ -177,3 +177,7 @@
 - 2026-02-10T15:58:27.3085873Z | Continued M4 Gallery implementation: reviewed pending diffs in frontend/src/api/client.ts and frontend/src/pages/ExportReport.tsx for API-backed gallery list/detail/download/delete flow.
 - 2026-02-10T15:58:27.3085873Z | Validation: npm run build in frontend succeeded after Gallery integration updates.
 - 2026-02-10T15:58:27.3085873Z | Validation: python -m pytest -q in backend -> 20 passed (1 warning: torch.load future weights_only default).
+- 2026-02-10T16:06:30.7059513Z | Enhanced Gallery image generation: backend/app/core/gallery.py now creates a non-placeholder route preview PNG from route_geojson/start/goal using in-memory RGB rendering and PNG encoding (fallback to placeholder on exception).
+- 2026-02-10T16:06:30.7059513Z | Extended API smoke coverage: backend/tests/test_api_smoke.py now validates /v1/gallery/{id}/image.png returns image/png with non-trivial size (>500 bytes).
+- 2026-02-10T16:06:30.7059513Z | Frontend workflow integration: MapWorkspace adds Open In Gallery action after successful plan; top navigation Export button now routes to /export.
+- 2026-02-10T16:06:30.7059513Z | Validation: npm run build (frontend) succeeded; python -m pytest -q (backend) -> 20 passed, 1 warning.
