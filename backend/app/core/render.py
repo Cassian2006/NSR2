@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from app.core.config import Settings
+from app.core.geo import GridGeo, load_grid_geo
 
 
 @dataclass(frozen=True)
@@ -30,15 +31,6 @@ class BBox:
 
 
 _GRID_BOUNDS = GridBounds(lat_min=60.0, lat_max=86.0, lon_min=-180.0, lon_max=180.0)
-
-
-def _bounds_from_settings(settings: Settings) -> GridBounds:
-    return GridBounds(
-        lat_min=float(settings.grid_lat_min),
-        lat_max=float(settings.grid_lat_max),
-        lon_min=float(settings.grid_lon_min),
-        lon_max=float(settings.grid_lon_max),
-    )
 
 
 def parse_bbox(raw: str | None, *, bounds: GridBounds | None = None) -> BBox:
@@ -125,19 +117,17 @@ def _lerp_palette(norm: np.ndarray, stops: list[tuple[float, tuple[int, int, int
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int, *, bounds: GridBounds) -> tuple[np.ndarray, np.ndarray]:
-    h, w = data.shape
+def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int, *, geo: GridGeo) -> tuple[np.ndarray, np.ndarray]:
     lats = np.linspace(bbox.max_lat, bbox.min_lat, out_h, dtype=np.float64)
     lons = np.linspace(bbox.min_lon, bbox.max_lon, out_w, dtype=np.float64)
 
-    lat_in = (lats >= bounds.lat_min) & (lats <= bounds.lat_max)
-    lon_in = (lons >= bounds.lon_min) & (lons <= bounds.lon_max)
+    b = geo.bounds
+    lat_in = (lats >= b.lat_min) & (lats <= b.lat_max)
+    lon_in = (lons >= b.lon_min) & (lons <= b.lon_max)
     inside = lat_in[:, None] & lon_in[None, :]
 
-    row = np.rint((bounds.lat_max - lats) / (bounds.lat_max - bounds.lat_min) * (h - 1)).astype(np.int64)
-    col = np.rint((lons - bounds.lon_min) / (bounds.lon_max - bounds.lon_min) * (w - 1)).astype(np.int64)
-    row = np.clip(row, 0, h - 1)
-    col = np.clip(col, 0, w - 1)
+    row = geo.rows_for_lats(lats)
+    col = geo.cols_for_lons(lons)
 
     sampled = data[np.ix_(row, col)]
     return sampled, inside
@@ -266,12 +256,12 @@ def render_overlay_png(
     width: int,
     height: int,
 ) -> bytes:
-    bounds = _bounds_from_settings(settings)
     grid = _load_layer_grid(settings, timestamp, layer)
     if grid is None or grid.ndim != 2:
         return _encode_png_rgba(_empty_image(width, height))
 
-    sampled, inside = _sample_grid(grid.astype(np.float32), bbox, width, height, bounds=bounds)
+    geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
+    sampled, inside = _sample_grid(grid.astype(np.float32), bbox, width, height, geo=geo)
 
     if layer == "bathy":
         image = _render_bathy(sampled, inside)

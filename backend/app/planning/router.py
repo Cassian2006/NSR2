@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from app.core.config import Settings
+from app.core.geo import load_grid_geo
 from app.model.infer import run_unet_inference
 
 
@@ -38,25 +39,6 @@ class GridBounds:
     lat_max: float
     lon_min: float
     lon_max: float
-
-
-def _latlon_to_rc(lat: float, lon: float, h: int, w: int, bounds: GridBounds) -> tuple[int, int]:
-    if not (bounds.lat_min <= lat <= bounds.lat_max and bounds.lon_min <= lon <= bounds.lon_max):
-        raise PlanningError(
-            f"Point out of grid bounds: lat={lat}, lon={lon}, "
-            f"bounds=({bounds.lat_min},{bounds.lat_max},{bounds.lon_min},{bounds.lon_max})"
-        )
-    r = int(round((bounds.lat_max - lat) / (bounds.lat_max - bounds.lat_min) * (h - 1)))
-    c = int(round((lon - bounds.lon_min) / (bounds.lon_max - bounds.lon_min) * (w - 1)))
-    r = min(max(r, 0), h - 1)
-    c = min(max(c, 0), w - 1)
-    return r, c
-
-
-def _rc_to_latlon(r: int, c: int, h: int, w: int, bounds: GridBounds) -> tuple[float, float]:
-    lat = bounds.lat_max - (r / max(1, h - 1)) * (bounds.lat_max - bounds.lat_min)
-    lon = bounds.lon_min + (c / max(1, w - 1)) * (bounds.lon_max - bounds.lon_min)
-    return float(lat), float(lon)
 
 
 def _neighbors(r: int, c: int, h: int, w: int):
@@ -166,6 +148,7 @@ def plan_grid_route(
         raise PlanningError(f"blocked_mask missing for timestamp={timestamp}: {blocked_path}")
     blocked_bathy = np.load(blocked_path).astype(np.uint8) > 0
     h, w = blocked_bathy.shape
+    geo = load_grid_geo(settings, timestamp=timestamp, shape=(h, w))
 
     pred_path = settings.pred_root / model_version / f"{timestamp}.npy"
     if ("unet_blocked" in blocked_sources or caution_mode == "tie_breaker") and not pred_path.exists():
@@ -194,13 +177,25 @@ def plan_grid_route(
     ais_norm = ais / ais_max if ais_max > 1e-8 else np.zeros_like(ais)
 
     bounds = GridBounds(
-        lat_min=float(settings.grid_lat_min),
-        lat_max=float(settings.grid_lat_max),
-        lon_min=float(settings.grid_lon_min),
-        lon_max=float(settings.grid_lon_max),
+        lat_min=float(geo.bounds.lat_min),
+        lat_max=float(geo.bounds.lat_max),
+        lon_min=float(geo.bounds.lon_min),
+        lon_max=float(geo.bounds.lon_max),
     )
-    s_rc = _latlon_to_rc(start[0], start[1], h, w, bounds)
-    g_rc = _latlon_to_rc(goal[0], goal[1], h, w, bounds)
+    sr0, sc0, s_inside = geo.latlon_to_rc(start[0], start[1])
+    gr0, gc0, g_inside = geo.latlon_to_rc(goal[0], goal[1])
+    if not s_inside:
+        raise PlanningError(
+            f"Point out of grid bounds: lat={start[0]}, lon={start[1]}, "
+            f"bounds=({bounds.lat_min},{bounds.lat_max},{bounds.lon_min},{bounds.lon_max})"
+        )
+    if not g_inside:
+        raise PlanningError(
+            f"Point out of grid bounds: lat={goal[0]}, lon={goal[1]}, "
+            f"bounds=({bounds.lat_min},{bounds.lat_max},{bounds.lon_min},{bounds.lon_max})"
+        )
+    s_rc = (sr0, sc0)
+    g_rc = (gr0, gc0)
     s_rc_adj = _nearest_unblocked(s_rc, blocked, free_cells)
     g_rc_adj = _nearest_unblocked(g_rc, blocked, free_cells)
 
@@ -248,11 +243,11 @@ def plan_grid_route(
         if (r, c) == (gr, gc):
             break
 
-        lat0, lon0 = _rc_to_latlon(r, c, h, w, bounds)
+        lat0, lon0 = geo.rc_to_latlon(r, c)
         for rr, cc in _neighbors(r, c, h, w):
             if closed[rr, cc] or blocked[rr, cc]:
                 continue
-            lat1, lon1 = _rc_to_latlon(rr, cc, h, w, bounds)
+            lat1, lon1 = geo.rc_to_latlon(rr, cc)
             step_km = haversine_km(lat0, lon0, lat1, lon1)
             mult = 1.0
             if caution[rr, cc]:
@@ -281,7 +276,7 @@ def plan_grid_route(
     prev_lat = None
     prev_lon = None
     for idx, (r, c) in enumerate(cells):
-        lat, lon = _rc_to_latlon(r, c, h, w, bounds)
+        lat, lon = geo.rc_to_latlon(r, c)
         coords.append([lon, lat])
         corridor_vals.append(float(ais_norm[r, c]))
         if idx > 0 and prev_lat is not None and prev_lon is not None:

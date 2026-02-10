@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from app.core.config import Settings
+from app.core.geo import load_grid_geo
 
 
 class EvalError(RuntimeError):
@@ -39,19 +40,6 @@ def _coords_from_geojson(route_geojson: dict) -> list[tuple[float, float]]:
     return out
 
 
-def _rc_from_lonlat(lon: float, lat: float, h: int, w: int, *, settings: Settings) -> tuple[int, int, bool]:
-    lon_min = float(settings.grid_lon_min)
-    lon_max = float(settings.grid_lon_max)
-    lat_min = float(settings.grid_lat_min)
-    lat_max = float(settings.grid_lat_max)
-    inside = lon_min <= lon <= lon_max and lat_min <= lat <= lat_max
-    r = int(round((lat_max - lat) / max(1e-6, (lat_max - lat_min)) * (h - 1)))
-    c = int(round((lon - lon_min) / max(1e-6, (lon_max - lon_min)) * (w - 1)))
-    r = min(max(r, 0), h - 1)
-    c = min(max(c, 0), w - 1)
-    return r, c, inside
-
-
 def evaluate_route_vs_ais_heatmap(*, settings: Settings, timestamp: str, route_geojson: dict) -> dict:
     heatmap_path = _find_heatmap(settings.ais_heatmap_root, timestamp)
     if heatmap_path is None:
@@ -62,10 +50,11 @@ def evaluate_route_vs_ais_heatmap(*, settings: Settings, timestamp: str, route_g
 
     coords = _coords_from_geojson(route_geojson)
     h, w = heat.shape
+    geo = load_grid_geo(settings, timestamp=timestamp, shape=(h, w))
     values: list[float] = []
     inside_count = 0
     for lon, lat in coords:
-        r, c, inside = _rc_from_lonlat(lon, lat, h, w, settings=settings)
+        r, c, inside = geo.latlon_to_rc(lat, lon)
         if inside:
             inside_count += 1
         values.append(float(heat[r, c]))
@@ -105,4 +94,3 @@ def evaluate_route_vs_ais_heatmap(*, settings: Settings, timestamp: str, route_g
         "alignment_norm_0_1": round(norm_alignment, 4),
         "alignment_zscore": round(zscore, 4),
     }
-

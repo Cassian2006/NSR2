@@ -206,3 +206,8 @@
 - 2026-02-10T16:25:13.7229874Z | Validation: python -m pytest -q (backend) -> 23 passed, 1 warning; npm run build (frontend) succeeded.
 - 2026-02-10T16:27:09.7965176Z | Rewrote readme.md in clean UTF-8 and synchronized it with current implementation state (React+Vite+FastAPI stack, real overlay/tile rendering, planning modes, gallery screenshot upload, AIS backtest API).
 - 2026-02-10T16:27:09.7965176Z | Validation before push: python -m pytest -q (backend) -> 23 passed, 1 warning; npm run build (frontend) succeeded.
+- 2026-02-10T16:31:05.6419781Z | Added backend/app/core/geo.py introducing GridGeo + load_grid_geo: supports optional per-timestamp lat/lon axis files (latitudes/lats/lat + longitudes/lons/lon) with fallback to configured grid bounds.
+- 2026-02-10T16:31:05.6419781Z | Integrated geo mapping into backend/app/planning/router.py: lat/lon <-> grid conversion now uses GridGeo; explain.grid_bounds now reflects effective geo bounds.
+- 2026-02-10T16:31:05.6419781Z | Integrated geo mapping into backend/app/core/render.py and backend/app/eval/compare_ais.py so overlay sampling and AIS backtest use the same coordinate mapping logic as planner.
+- 2026-02-10T16:31:05.6419781Z | Added unit coverage in backend/tests/test_geo_mapping.py for axis roundtrip, annotation-axis preference, and fallback bound behavior.
+- 2026-02-10T16:31:05.6419781Z | Validation: python -m pytest -q (backend) -> 26 passed, 1 warning; npm run build (frontend) succeeded.
