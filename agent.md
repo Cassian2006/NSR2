@@ -327,3 +327,5 @@
 - 2026-02-10T21:19:35.6760408+00:00 | Added regression test backend/tests/test_infer_runtime.py for missing-torch error path.
 - 2026-02-10T21:19:35.6760408+00:00 | Validation: python -m pytest -q (backend) -> 41 passed; npm run build (frontend) succeeded.
 - 2026-02-10T21:20:56.4837433+00:00 | Pre-submit validation before missing-torch resilience push: python -m pytest -q (backend) -> 41 passed; npm run build (frontend) succeeded.
+- 2026-02-10T21:21:25.2290682+00:00 | Created commit 974656a (missing-torch startup resilience + workspace layout fallback visibility fix) and pushed to origin/main.
+- 2026-02-10T21:21:52.3627306+00:00 | Pre-submit validation before log-sync push: python -m pytest -q (backend) -> 41 passed.
