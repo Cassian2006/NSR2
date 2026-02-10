@@ -250,3 +250,9 @@
 - 2026-02-10T17:54:17.0488794Z | Updated frontend defaults to in-domain coordinates and view window for current dataset AOI in frontend/src/pages/MapWorkspace.tsx and frontend/src/components/MapCanvas.tsx.
 - 2026-02-10T17:54:17.0488794Z | Updated backend tests to use in-domain route test coordinates; isolated geo fallback test by setting env_grids_root to tmp path in backend/tests/test_geo_mapping.py.
 - 2026-02-10T17:54:17.0488794Z | Validation: backend pytest 32 passed; frontend build succeeded; runtime tile probe confirms west tile transparent and east tile non-empty after backend restart.
+- 2026-02-10T18:03:18.2050884+00:00 | Audited blocked/caution labeling consistency across data/processed/annotation_pack (492 timestamps): y_class integrity check passed, blocked ratio static at ~59.86%, caution overlap with blocked low (mean ~0.26%, max ~7.49%).
+- 2026-02-10T18:03:18.2050884+00:00 | Fixed UNet overlay interpretation in backend/app/core/render.py: when rendering layer `unet_pred`, hide caution/blocked pixels on bathy-blocked cells so red represents incremental UNet-blocked areas instead of re-coloring static bathy land mask.
+- 2026-02-10T18:03:18.2050884+00:00 | Added backend/tests/test_render_unet_overlay.py to validate class colors and bathy-masked UNet rendering behavior.
+- 2026-02-10T18:03:18.2050884+00:00 | Validation: python -m pytest -q (backend) -> 34 passed.
+- 2026-02-10T18:04:38.5979151+00:00 | Exported per-timestamp blocked/caution audit report to outputs/qa/blocked_caution_audit.json (492 samples; includes class ratios and caution-overlap metrics).
+- 2026-02-10T18:04:38.5979151+00:00 | Restarted backend runtime at http://127.0.0.1:8001 and verified health endpoint returns {"status":"ok"}.

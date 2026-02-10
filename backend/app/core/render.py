@@ -199,10 +199,19 @@ def _render_bathy(sampled: np.ndarray, inside: np.ndarray) -> np.ndarray:
     return image
 
 
-def _render_unet(sampled: np.ndarray, inside: np.ndarray) -> np.ndarray:
+def _render_unet(
+    sampled: np.ndarray,
+    inside: np.ndarray,
+    *,
+    bathy_blocked_sampled: np.ndarray | None = None,
+) -> np.ndarray:
     image = _empty_image(sampled.shape[1], sampled.shape[0])
     caution = (sampled == 1) & inside
     blocked = (sampled == 2) & inside
+    if bathy_blocked_sampled is not None and bathy_blocked_sampled.shape == sampled.shape:
+        bathy_blocked = (bathy_blocked_sampled > 0.5) & inside
+        caution &= ~bathy_blocked
+        blocked &= ~bathy_blocked
     image[caution] = np.asarray([245, 158, 11, 145], dtype=np.uint8)
     image[blocked] = np.asarray([239, 68, 68, 185], dtype=np.uint8)
     return image
@@ -290,7 +299,15 @@ def render_overlay_png(
     if layer == "bathy":
         image = _render_bathy(sampled, inside)
     elif layer == "unet_pred":
-        image = _render_unet(np.rint(sampled).astype(np.int16), inside)
+        bathy_sampled = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid(bathy_grid.astype(np.float32), bbox, width, height, geo=geo)
+        image = _render_unet(
+            np.rint(sampled).astype(np.int16),
+            inside,
+            bathy_blocked_sampled=bathy_sampled,
+        )
     elif layer == "ais_heatmap":
         image = _render_continuous(
             sampled,
@@ -354,7 +371,15 @@ def render_tile_png(
     if layer == "bathy":
         image = _render_bathy(sampled, inside)
     elif layer == "unet_pred":
-        image = _render_unet(np.rint(sampled).astype(np.int16), inside)
+        bathy_sampled = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid_from_axes(bathy_grid.astype(np.float32), lats, lons, geo=geo)
+        image = _render_unet(
+            np.rint(sampled).astype(np.int16),
+            inside,
+            bathy_blocked_sampled=bathy_sampled,
+        )
     elif layer == "ais_heatmap":
         image = _render_continuous(
             sampled,
