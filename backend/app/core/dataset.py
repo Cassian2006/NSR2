@@ -48,19 +48,28 @@ class DatasetService:
     @lru_cache(maxsize=1)
     def _scan_samples(self) -> dict[str, SampleRecord]:
         records: dict[str, SampleRecord] = {}
-        if not self.settings.processed_samples_root.exists():
-            return records
 
-        for meta_path in self.settings.processed_samples_root.rglob("meta.json"):
-            folder = meta_path.parent
-            ts = folder.name
-            if not TIMESTAMP_DIR_RE.match(ts):
-                continue
-            files = {p.name: p for p in folder.glob("*.npy")}
-            existing = records.get(ts)
-            if existing and len(existing.files) >= len(files):
-                continue
-            records[ts] = SampleRecord(timestamp=ts, folder=folder, files=files)
+        # Prefer annotation_pack because it contains aligned x_stack/bathy masks
+        # required by current infer/planning pipeline.
+        if self.settings.annotation_pack_root.exists():
+            for folder in sorted(self.settings.annotation_pack_root.iterdir()):
+                if not folder.is_dir():
+                    continue
+                ts = folder.name
+                if not TIMESTAMP_DIR_RE.match(ts):
+                    continue
+                files = {p.name: p for p in folder.glob("*.npy")}
+                records[ts] = SampleRecord(timestamp=ts, folder=folder, files=files)
+
+        # Fallback to legacy samples only when annotation_pack is unavailable/empty.
+        if not records and self.settings.processed_samples_root.exists():
+            for meta_path in self.settings.processed_samples_root.rglob("meta.json"):
+                folder = meta_path.parent
+                ts = folder.name
+                if not TIMESTAMP_DIR_RE.match(ts):
+                    continue
+                files = {p.name: p for p in folder.glob("*.npy")}
+                records[ts] = SampleRecord(timestamp=ts, folder=folder, files=files)
         return records
 
     @lru_cache(maxsize=1)
@@ -124,11 +133,12 @@ class DatasetService:
         if legacy and legacy.get("x_bathy"):
             legacy_bathy_exists = Path(str(legacy["x_bathy"])).exists()
 
+        has_bathy = bool(sample and ("x_bathy.npy" in sample.files or "blocked_mask.npy" in sample.files or "x_stack.npy" in sample.files))
         return [
             {
                 "id": "bathy",
                 "name": "Bathymetry",
-                "available": bool(sample and "x_bathy.npy" in sample.files) or legacy_bathy_exists,
+                "available": has_bathy or legacy_bathy_exists,
                 "unit": "m",
             },
             {

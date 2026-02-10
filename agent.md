@@ -163,3 +163,7 @@
 - 2026-02-10T15:23:09.8742288Z | Re-finalized active_20260210_145951 with full mapping: merged=19, suggest_only=1 (remaining missing review: active_011 / 2024-07-20_12).
 - 2026-02-10T15:23:09.8742288Z | Rebuilt manifest post-merge: data/processed/unet_manifest_labeled.csv -> rows=152 (train=109, val=43).
 - 2026-02-10T15:23:09.8742288Z | Retrain comparison runs completed: outputs/train_runs/unet_cycle_full_v1_r3 and outputs/train_runs/unet_cycle_full_v1_r3_focus; both underperform prior bests (v1 and v1_r2_focus).
+- 2026-02-10T15:32:00.1755556Z | Integrated real U-Net inference backend path: /v1/infer now runs TinyUNet using configured best summary/ckpt, normalizes x_stack, caches outputs to outputs/pred/{model_version}/{timestamp}.npy, and returns class histogram/ratios.
+- 2026-02-10T15:32:00.1755556Z | Updated dataset timestamp source to prefer annotation_pack and fallback to legacy samples only when annotation_pack unavailable, aligning /v1/timestamps with infer-ready data.
+- 2026-02-10T15:32:00.1755556Z | Added inference runtime regression test backend/tests/test_model_infer_runtime.py (persist + cache-hit behavior).
+- 2026-02-10T15:32:00.1755556Z | Validation: python -m pytest -q in backend -> 20 passed.
