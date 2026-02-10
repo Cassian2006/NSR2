@@ -11,6 +11,7 @@ import { Download } from "lucide-react";
 import { useState } from "react";
 import LanguageSwitch from "./LanguageSwitch";
 import { useLanguage } from "../contexts/LanguageContext";
+import appLogo from "../assets/app-logo.png";
 
 export default function Layout() {
   const location = useLocation();
@@ -23,10 +24,8 @@ export default function Layout() {
       <header className="border-b border-border bg-gradient-to-r from-blue-50 via-white to-indigo-50 px-6 py-3 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-8">
           <Link to="/" className="flex items-center gap-2">
-            <div className="p-1.5 bg-blue-600 rounded-lg">
-              <svg className="size-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-              </svg>
+            <div className="size-8 rounded-lg border border-blue-200 bg-white p-0.5 shadow-sm">
+              <img src={appLogo} alt="NSR logo" className="h-full w-full rounded-md object-cover" />
             </div>
             <h1 className="text-foreground">{t("app.title")}</h1>
           </Link>

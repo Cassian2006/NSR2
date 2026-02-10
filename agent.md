@@ -275,3 +275,8 @@
 - 2026-02-10T20:24:16.5276922+00:00 | Extended backend/tests/test_render_sampling.py with test_render_continuous_respects_value_mask to guard masking behavior.
 - 2026-02-10T20:24:16.5276922+00:00 | Validation: python -m pytest -q (backend) -> 39 passed.
 - 2026-02-10T20:24:16.5276922+00:00 | Restarted backend server on http://127.0.0.1:8001 and verified /healthz returns ok.
+- 2026-02-10T20:29:48.0550141+00:00 | Located desktop logo source C:/Users/cai yuan qi/Desktop/roundLOGO.png and generated center-cropped app logo asset (52% center crop) as frontend/src/assets/app-logo.png.
+- 2026-02-10T20:29:48.0550141+00:00 | Added browser favicon asset frontend/public/favicon.png derived from cropped logo.
+- 2026-02-10T20:29:48.0550141+00:00 | Replaced top-left header icon in frontend/src/components/Layout.tsx with the new cropped logo image.
+- 2026-02-10T20:29:48.0550141+00:00 | Updated frontend/index.html to use /favicon.png as application icon.
+- 2026-02-10T20:29:48.0550141+00:00 | Validation: npm run build (frontend) succeeded; python -m pytest -q (backend) -> 39 passed.
