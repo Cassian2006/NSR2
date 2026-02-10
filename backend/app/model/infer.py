@@ -24,6 +24,16 @@ class InferenceBundle:
     device: str
 
 
+def _load_checkpoint(ckpt_path: Path, device: str):
+    """
+    Prefer safer torch loading when available; fall back for older torch versions.
+    """
+    try:
+        return torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        return torch.load(ckpt_path, map_location=device)
+
+
 def _class_stats(pred: np.ndarray) -> dict[str, int]:
     return {
         "safe": int((pred == 0).sum()),
@@ -102,7 +112,7 @@ def _load_bundle(summary_path_str: str) -> InferenceBundle:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = TinyUNet(in_channels=in_channels, n_classes=3, base=24).to(device)
-    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt = _load_checkpoint(ckpt_path, device)
     state = ckpt.get("model", ckpt)
     model.load_state_dict(state)
     model.eval()

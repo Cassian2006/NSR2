@@ -227,3 +227,5 @@
 - 2026-02-10T16:49:36.9083172Z | Extended backend/tests/test_api_smoke.py with test_error_payload_shape to guard 422 payload contract.
 - 2026-02-10T16:52:14.5875271Z | Added test_route_plan_is_stable_and_stays_out_of_blocked in backend/tests/test_api_smoke.py to enforce deterministic planning outputs for identical inputs and assert all routed points stay outside fused blocked mask (bathy OR unet_blocked).
 - 2026-02-10T16:52:14.5875271Z | Validation: python -m pytest -q (backend) -> 31 passed, 1 warning.
+- 2026-02-10T16:53:12.2692579Z | Hardened model checkpoint loading in backend/app/model/infer.py: added _load_checkpoint() to prefer torch.load(..., weights_only=True) with backward-compatible fallback for older torch versions.
+- 2026-02-10T16:53:12.2692579Z | Validation: python -m pytest -q (backend) -> 31 passed, 0 warnings.
