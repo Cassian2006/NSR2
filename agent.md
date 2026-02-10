@@ -150,3 +150,10 @@
 - 2026-02-10T14:53:33.0373774Z | Ran augmentation+cycle training experiments: unet_cycle_full_v1, unet_cycle_filtered_v1, unet_cycle_filtered_v2, unet_cycle_full_v2, unet_cycle_full_v3 for comparison.
 - 2026-02-10T14:53:33.0373774Z | Best balanced run so far from this sweep: outputs/train_runs/unet_cycle_full_v1/summary.json (best val_loss=0.2587, val_miou=0.7058, val_iou_caution=0.4198, val_iou_blocked=0.9206).
 - 2026-02-10T14:53:33.0373774Z | Validation: python -m pytest -q in backend -> 19 passed.
+- 2026-02-10T15:00:57.8603599Z | Started new optimization labeling round from outputs/train_runs/unet_cycle_full_v1/summary.json using active_learning_suggest (top_k=20, pred_threshold=0.68, max_suggest_ratio=0.035, smooth=2x1).
+- 2026-02-10T15:00:57.8603599Z | Generated round outputs at outputs/active_learning/active_20260210_145951/labelme_active_topk with suggest ratio mean=0.0411 (min=0.0392, max=0.0432).
+- 2026-02-10T15:00:57.8603599Z | Prepared labeling folders: only20_raw and only20_landmask_ai (blocked=black, AI suggestion=cyan+white edge), and launched Labelme on only20_landmask_ai.
+- 2026-02-10T15:10:30.9966684Z | Received user completion notice for active round active_20260210_145951; detected 15/20 review JSONs in only20_landmask_ai.
+- 2026-02-10T15:10:30.9966684Z | Finalized partial review merge for active_20260210_145951 with --merge-with-suggest: merged=15, suggest_only=5, human_only=0.
+- 2026-02-10T15:10:30.9966684Z | Rebuilt manifest after merge: data/processed/unet_manifest_labeled.csv -> rows=152 (train=109, val=43, val_month=202408).
+- 2026-02-10T15:10:30.9966684Z | Trained run outputs/train_runs/unet_cycle_full_v1_r2 and outputs/train_runs/unet_cycle_full_v1_r2_focus for post-merge evaluation.
