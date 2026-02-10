@@ -297,3 +297,6 @@
 - 2026-02-10T20:42:09.8523456+00:00 | Pre-submit validation before log-sync push: python -m pytest -q (backend) -> 40 passed.
 - 2026-02-10T20:49:54.1383901+00:00 | Fixed Blueprint schema in render.yaml for Render compatibility: changed backend service key from runtime->env (python) and frontend service type from web/runtime:static to type:static.
 - 2026-02-10T20:50:37.1704382+00:00 | Pre-submit validation before Blueprint-fix push: python -m pytest -q (backend) -> 40 passed.
+- 2026-02-10T20:51:59.2742179+00:00 | Fixed Render Blueprint compatibility for accounts rejecting type=static: updated render.yaml frontend service to type=web + runtime=static; reverted backend service key to runtime=python.
+- 2026-02-10T20:51:59.2742179+00:00 | Updated DEPLOY_RENDER.md wording to match runtime:static blueprint setup.
+- 2026-02-10T20:56:44.3500366+00:00 | Pre-submit validation before Render-blueprint-fix push: python -m pytest -q (backend) -> 40 passed.

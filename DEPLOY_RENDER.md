@@ -5,7 +5,7 @@
 2. In Render, use **New +** -> **Blueprint**.
 3. Select this repository; Render will read `render.yaml` and create:
    - `nsr2-api` (FastAPI)
-   - `nsr2-web` (static frontend)
+   - `nsr2-web` (web service with `runtime: static`)
 
 ## 2. Required Environment Variables
 
