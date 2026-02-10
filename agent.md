@@ -128,3 +128,20 @@
 - 2026-02-10T13:16:27+00:00 | Finalized active round active_20260210_131016 review labels into annotation_pack: merged=9, suggest_only=11.
 - 2026-02-10T13:16:27+00:00 | Rebuilt labeled manifest after merge: data/processed/unet_manifest_labeled.csv -> rows=112 (train=80, val=32, val_month=202408).
 - 2026-02-10T13:16:27+00:00 | Retrained quick U-Net on 112 labels: outputs/train_runs/unet_quick_20260210_131527/summary.json (best val_loss=0.3352, val_miou=0.6629, val_iou_caution=0.4300, val_iou_blocked=0.8681; peak caution epoch=3 -> 0.4816).
+- 2026-02-10T13:27:46.9066241Z | Tuned backend/scripts/active_learning_suggest.py for conservative AI suggestion defaults: pred_threshold=0.60, max_suggest_ratio=0.06, plus neighborhood smoothing controls.
+- 2026-02-10T13:27:46.9066241Z | Added tests backend/tests/test_active_learning_suggest.py covering ratio-capped thresholding and binary mask smoothing behavior.
+- 2026-02-10T13:27:46.9066241Z | Validation: python -m pytest -q in backend -> 19 passed.
+- 2026-02-10T13:27:46.9066241Z | Ran strict active-learning export: python backend/scripts/active_learning_suggest.py --top-k 20 --pred-threshold 0.65 --max-suggest-ratio 0.04 --smooth-min-neighbors 2 --smooth-iters 1 -> outputs/active_learning/active_20260210_132408/labelme_active_topk.
+- 2026-02-10T13:27:46.9066241Z | QA on top-20 suggested masks: mean sea ratio=0.0466 (min=0.0455, max=0.0480), confirming lower AI auto-annotation coverage for manual²¹±ê workflow.
+- 2026-02-10T13:30:26.0264903Z | Prepared isolated labeling folder for current active round: outputs/active_learning/active_20260210_132408/labelme_active_topk/only20_raw (20 raw images + mapping.csv + README.txt).
+- 2026-02-10T13:30:26.0264903Z | Launched Labelme and Explorer on outputs/active_learning/active_20260210_132408/labelme_active_topk/only20_raw for manual caution²¹±ê workflow.
+- 2026-02-10T13:32:11.0224680Z | Fixed black active-learning base images: backend/scripts/active_learning_suggest.py now loads quicklook_blocked_overlay.png, then quicklook.png, then quicklook_riskhint.png before zero fallback.
+- 2026-02-10T13:32:11.0224680Z | Repaired current batch visuals in-place for outputs/active_learning/active_20260210_132408/labelme_active_topk and only20_raw by regenerating active_001..020 from annotation_pack quicklook images.
+- 2026-02-10T13:32:11.0224680Z | Validation: python -m pytest -q in backend -> 19 passed. Relaunched Labelme on outputs/active_learning/active_20260210_132408/labelme_active_topk/only20_raw.
+- 2026-02-10T13:38:25.4139201Z | Generated overlay labeling set with landmask+AI suggestion: outputs/active_learning/active_20260210_132408/labelme_active_topk/only20_landmask_ai (blocked/land=black, AI caution=cyan with white boundary).
+- 2026-02-10T13:38:25.4139201Z | Launched Explorer and Labelme on outputs/active_learning/active_20260210_132408/labelme_active_topk/only20_landmask_ai for manual²¹±ê.
+- 2026-02-10T14:40:01.6346997Z | Finalized user-completed active round from outputs/active_learning/active_20260210_132408/labelme_active_topk/only20_landmask_ai: merged=20, human_only=0, suggest_only=0.
+- 2026-02-10T14:40:01.6346997Z | Rebuilt labeled manifest: data/processed/unet_manifest_labeled.csv -> rows=132 (train=90, val=42, val_month=202408, skip-empty-caution=true).
+- 2026-02-10T14:40:01.6346997Z | Trained quick U-Net baseline (default 4 epochs): outputs/train_runs/unet_quick_20260210_143810/summary.json.
+- 2026-02-10T14:40:01.6346997Z | Trained extended quick U-Net (12 epochs): outputs/train_runs/unet_quick_20260210_143847/summary.json (best loss epoch=10, val_loss=0.3896; peak caution epoch=11, val_iou_caution=0.3683).
+- 2026-02-10T14:40:16.2746577Z | Validation: python -m pytest -q in backend -> 19 passed.

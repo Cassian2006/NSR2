@@ -41,8 +41,29 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--pred-threshold",
         type=float,
-        default=0.45,
+        default=0.60,
         help="Threshold on caution probability for suggested caution mask.",
+    )
+    p.add_argument(
+        "--max-suggest-ratio",
+        type=float,
+        default=0.06,
+        help=(
+            "Upper bound of suggested caution pixels over sea pixels. "
+            "When exceeded, raise effective threshold by quantile to cap suggestion size."
+        ),
+    )
+    p.add_argument(
+        "--smooth-min-neighbors",
+        type=int,
+        default=2,
+        help="Keep a suggested pixel only if >=N pixels are active in its 3x3 neighborhood. 0 disables.",
+    )
+    p.add_argument(
+        "--smooth-iters",
+        type=int,
+        default=1,
+        help="How many times to apply neighborhood smoothing on suggestion mask.",
     )
     p.add_argument(
         "--out-dir",
@@ -59,9 +80,10 @@ def _list_train_summaries(outputs_root: Path) -> list[Path]:
     return sorted(root.glob("unet_quick_*/summary.json"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
-def _load_image(path: Path, fallback_shape: tuple[int, int]) -> np.ndarray:
-    if path.exists():
-        return np.array(Image.open(path).convert("RGB"), dtype=np.uint8)
+def _load_image(paths: list[Path], fallback_shape: tuple[int, int]) -> np.ndarray:
+    for path in paths:
+        if path.exists():
+            return np.array(Image.open(path).convert("RGB"), dtype=np.uint8)
     h, w = fallback_shape
     return np.zeros((h, w, 3), dtype=np.uint8)
 
@@ -94,6 +116,47 @@ def _entropy_from_probs(probs: np.ndarray) -> np.ndarray:
     eps = 1e-7
     p = np.clip(probs, eps, 1.0)
     return -np.sum(p * np.log(p), axis=0)
+
+
+def _cap_threshold_by_ratio(
+    caution_prob: np.ndarray,
+    sea: np.ndarray,
+    base_threshold: float,
+    max_ratio: float,
+) -> float:
+    if max_ratio <= 0.0:
+        return float(base_threshold)
+    sea_count = int(sea.sum())
+    if sea_count == 0:
+        return float(base_threshold)
+    base_ratio = float((caution_prob[sea] >= base_threshold).mean())
+    if base_ratio <= max_ratio:
+        return float(base_threshold)
+    sea_probs = caution_prob[sea]
+    quantile = max(0.0, min(1.0, 1.0 - max_ratio))
+    cap_threshold = float(np.quantile(sea_probs, quantile))
+    return float(max(base_threshold, cap_threshold))
+
+
+def _smooth_binary_mask(mask: np.ndarray, min_neighbors: int, iters: int) -> np.ndarray:
+    if min_neighbors <= 0 or iters <= 0:
+        return (mask > 0).astype(np.uint8)
+    out = (mask > 0).astype(np.uint8)
+    for _ in range(iters):
+        padded = np.pad(out, 1, mode="constant", constant_values=0)
+        neighbors = (
+            padded[:-2, :-2]
+            + padded[:-2, 1:-1]
+            + padded[:-2, 2:]
+            + padded[1:-1, :-2]
+            + padded[1:-1, 1:-1]
+            + padded[1:-1, 2:]
+            + padded[2:, :-2]
+            + padded[2:, 1:-1]
+            + padded[2:, 2:]
+        )
+        out = (neighbors >= min_neighbors).astype(np.uint8)
+    return out
 
 
 def main() -> None:
@@ -241,13 +304,32 @@ def main() -> None:
         with torch.no_grad():
             probs = torch.softmax(model(xt), dim=1).cpu().numpy()[0]
         caution_prob = probs[1]
-        suggested = ((caution_prob >= args.pred_threshold) & sea).astype(np.uint8)
+        effective_threshold = _cap_threshold_by_ratio(
+            caution_prob=caution_prob,
+            sea=sea,
+            base_threshold=args.pred_threshold,
+            max_ratio=args.max_suggest_ratio,
+        )
+        suggested = ((caution_prob >= effective_threshold) & sea).astype(np.uint8)
+        suggested = _smooth_binary_mask(
+            suggested,
+            min_neighbors=args.smooth_min_neighbors,
+            iters=args.smooth_iters,
+        )
+        suggested &= sea.astype(np.uint8)
 
         # save per-timestamp suggestion for manual refinement reference
         np.save(folder / "caution_suggested.npy", suggested.astype(np.uint8))
         Image.fromarray((suggested * 255).astype(np.uint8)).save(folder / "caution_suggested.png")
 
-        base = _load_image(folder / "quicklook_blocked_overlay.png", fallback_shape=suggested.shape)
+        base = _load_image(
+            [
+                folder / "quicklook_blocked_overlay.png",
+                folder / "quicklook.png",
+                folder / "quicklook_riskhint.png",
+            ],
+            fallback_shape=suggested.shape,
+        )
         overlay = _overlay_suggestion(base, suggested, blocked)
         heat = (np.clip(caution_prob, 0.0, 1.0) * 255.0).astype(np.uint8)
 
@@ -316,6 +398,9 @@ def main() -> None:
                 "ranked_count": len(rows),
                 "top_k": len(top),
                 "threshold": args.pred_threshold,
+                "max_suggest_ratio": args.max_suggest_ratio,
+                "smooth_min_neighbors": args.smooth_min_neighbors,
+                "smooth_iters": args.smooth_iters,
                 "ranking_csv": str(ranking_csv),
                 "labelme_dir": str(labelme_dir),
             },
