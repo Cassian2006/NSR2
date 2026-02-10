@@ -174,3 +174,6 @@
 - 2026-02-10T15:54:15.2016266Z | Added frontend API client infer call (runInference) and InferResponse types in frontend/src/api/client.ts.
 - 2026-02-10T15:54:15.2016266Z | Updated frontend/src/pages/MapWorkspace.tsx with Run U-Net Inference button, inference stats panel, map click pick mode for start/goal, and improved route/inference toasts.
 - 2026-02-10T15:54:15.2016266Z | Validation: npm run build in frontend succeeded; python -m pytest -q in backend -> 20 passed.
+- 2026-02-10T15:58:27.3085873Z | Continued M4 Gallery implementation: reviewed pending diffs in frontend/src/api/client.ts and frontend/src/pages/ExportReport.tsx for API-backed gallery list/detail/download/delete flow.
+- 2026-02-10T15:58:27.3085873Z | Validation: npm run build in frontend succeeded after Gallery integration updates.
+- 2026-02-10T15:58:27.3085873Z | Validation: python -m pytest -q in backend -> 20 passed (1 warning: torch.load future weights_only default).

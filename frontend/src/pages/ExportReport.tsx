@@ -1,296 +1,257 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
+import { Download, FileJson, Image, RefreshCw, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import {
+  deleteGalleryItem,
+  getGalleryImageUrl,
+  getGalleryItem,
+  getGalleryList,
+  type GalleryItem,
+} from "../api/client";
+import StatCard from "../components/StatCard";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Download, FileJson, Image, FileText, CheckCircle2 } from "lucide-react";
-import { toast } from "sonner";
-import StatCard from "../components/StatCard";
 import { Separator } from "../components/ui/separator";
 
-export default function ExportReport() {
-  const [downloading, setDownloading] = useState<string | null>(null);
+function downloadJsonFile(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
-  const handleDownload = (type: string, filename: string) => {
-    setDownloading(type);
-    toast.loading(`Preparing ${filename}...`, { duration: 1000 });
-    
-    setTimeout(() => {
-      setDownloading(null);
-      toast.success(`Downloaded ${filename}`);
-    }, 1000);
+async function downloadImageFile(filename: string, imageUrl: string) {
+  const res = await fetch(imageUrl);
+  if (!res.ok) {
+    throw new Error(`Failed to download image: HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function ExportReport() {
+  const [searchParams] = useSearchParams();
+  const queryGalleryId = searchParams.get("gallery");
+
+  const [items, setItems] = useState<GalleryItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
+  const [loadingList, setLoadingList] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const loadList = async () => {
+    setLoadingList(true);
+    try {
+      const res = await getGalleryList();
+      setItems(res.items ?? []);
+      if ((res.items ?? []).length === 0) {
+        setSelectedId("");
+      } else {
+        setSelectedId((prev) => {
+          if (queryGalleryId && (res.items ?? []).some((it) => it.id === queryGalleryId)) return queryGalleryId;
+          if (prev && (res.items ?? []).some((it) => it.id === prev)) return prev;
+          return (res.items ?? [])[0].id;
+        });
+      }
+    } catch (error) {
+      toast.error(`Failed to load gallery list: ${String(error)}`);
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  useEffect(() => {
+    loadList();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setSelectedItem(null);
+      return;
+    }
+    let active = true;
+    async function loadDetail() {
+      setLoadingDetail(true);
+      try {
+        const detail = await getGalleryItem(selectedId);
+        if (!active) return;
+        setSelectedItem(detail);
+      } catch (error) {
+        if (!active) return;
+        toast.error(`Failed to load gallery item: ${String(error)}`);
+      } finally {
+        if (active) setLoadingDetail(false);
+      }
+    }
+    loadDetail();
+    return () => {
+      active = false;
+    };
+  }, [selectedId]);
+
+  const cautionPct = useMemo(() => {
+    if (!selectedItem || !selectedItem.distance_km || selectedItem.distance_km <= 0) return 0;
+    return (selectedItem.caution_len_km / selectedItem.distance_km) * 100;
+  }, [selectedItem]);
+
+  const imageUrl = selectedItem ? getGalleryImageUrl(selectedItem.id) : "";
+
+  const handleDelete = async () => {
+    if (!selectedItem) return;
+    const ok = window.confirm(`Delete gallery item ${selectedItem.id}?`);
+    if (!ok) return;
+    try {
+      await deleteGalleryItem(selectedItem.id);
+      toast.success("Gallery item deleted");
+      await loadList();
+    } catch (error) {
+      toast.error(`Delete failed: ${String(error)}`);
+    }
+  };
+
+  const handleDownloadRoute = () => {
+    if (!selectedItem?.route_geojson) {
+      toast.error("No route geojson in this item");
+      return;
+    }
+    downloadJsonFile(`route_${selectedItem.id}.geojson`, selectedItem.route_geojson);
+    toast.success("Route GeoJSON downloaded");
+  };
+
+  const handleDownloadReport = () => {
+    if (!selectedItem) return;
+    downloadJsonFile(`report_${selectedItem.id}.json`, selectedItem);
+    toast.success("Report JSON downloaded");
+  };
+
+  const handleDownloadImage = async () => {
+    if (!selectedItem) return;
+    try {
+      await downloadImageFile(`gallery_${selectedItem.id}.png`, imageUrl);
+      toast.success("Image downloaded");
+    } catch (error) {
+      toast.error(String(error));
+    }
   };
 
   return (
     <div className="h-full overflow-auto bg-gray-50">
-      <div className="max-w-6xl mx-auto p-12">
-        <div className="mb-8">
-          <h1 className="mb-2">Export & Report</h1>
-          <p className="text-muted-foreground">
-            Download route data, visualizations, and comprehensive analysis reports.
-          </p>
+      <div className="max-w-7xl mx-auto p-8">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="mb-1">Gallery & Export</h1>
+            <p className="text-muted-foreground">Review saved planning runs, inspect metadata, download outputs.</p>
+          </div>
+          <Button variant="outline" className="gap-2" onClick={loadList} disabled={loadingList}>
+            <RefreshCw className={`size-4 ${loadingList ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
         </div>
 
-        <div className="grid gap-6">
-          {/* Download Options */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
           <Card>
             <CardHeader>
-              <CardTitle>Export Options</CardTitle>
-              <CardDescription>
-                Download route and analysis data in various formats
-              </CardDescription>
+              <CardTitle>Saved Runs</CardTitle>
+              <CardDescription>{items.length} item(s)</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid md:grid-cols-3 gap-4">
-                <button
-                  onClick={() => handleDownload("geojson", "route.geojson")}
-                  disabled={downloading === "geojson"}
-                  className="p-6 rounded-lg border-2 border-border bg-white hover:border-primary/50 hover:bg-primary/5 transition-all text-left disabled:opacity-50"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <FileJson className="size-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="mb-1">Route GeoJSON</h4>
-                      <p className="text-sm text-muted-foreground mb-3">
-                        Waypoints and geometry
-                      </p>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        route.geojson • ~25 KB
-                      </div>
-                    </div>
-                  </div>
-                  <Button 
-                    size="sm" 
-                    className="w-full mt-4 gap-2"
-                    disabled={downloading === "geojson"}
-                  >
-                    <Download className="size-3" />
-                    Download GeoJSON
-                  </Button>
-                </button>
-
-                <button
-                  onClick={() => handleDownload("png", "map_screenshot.png")}
-                  disabled={downloading === "png"}
-                  className="p-6 rounded-lg border-2 border-border bg-white hover:border-primary/50 hover:bg-primary/5 transition-all text-left disabled:opacity-50"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-purple-100 rounded-lg">
-                      <Image className="size-5 text-purple-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="mb-1">Map Screenshot</h4>
-                      <p className="text-sm text-muted-foreground mb-3">
-                        High-res PNG with legend
-                      </p>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        map_screenshot.png • 1920×1080
-                      </div>
-                    </div>
-                  </div>
-                  <Button 
-                    size="sm" 
-                    className="w-full mt-4 gap-2"
-                    disabled={downloading === "png"}
-                  >
-                    <Download className="size-3" />
-                    Download PNG
-                  </Button>
-                </button>
-
-                <button
-                  onClick={() => handleDownload("json", "analysis_report.json")}
-                  disabled={downloading === "json"}
-                  className="p-6 rounded-lg border-2 border-border bg-white hover:border-primary/50 hover:bg-primary/5 transition-all text-left disabled:opacity-50"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-green-100 rounded-lg">
-                      <FileText className="size-5 text-green-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="mb-1">Analysis Report</h4>
-                      <p className="text-sm text-muted-foreground mb-3">
-                        Metadata and metrics
-                      </p>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        analysis_report.json • ~8 KB
-                      </div>
-                    </div>
-                  </div>
-                  <Button 
-                    size="sm" 
-                    className="w-full mt-4 gap-2"
-                    disabled={downloading === "json"}
-                  >
-                    <Download className="size-3" />
-                    Download JSON
-                  </Button>
-                </button>
-              </div>
-
-              <Separator className="my-6" />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="mb-1">Download All</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Export all files as a ZIP archive
-                  </p>
-                </div>
-                <Button
-                  onClick={() => handleDownload("zip", "nsr_route_export.zip")}
-                  disabled={downloading === "zip"}
-                  className="gap-2"
-                >
-                  <Download className="size-4" />
-                  Download All (ZIP)
-                </Button>
-              </div>
+            <CardContent className="space-y-2">
+              {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No gallery items yet.</div>
+              ) : (
+                items.map((item) => {
+                  const active = item.id === selectedId;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setSelectedId(item.id)}
+                      className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                        active ? "border-blue-500 bg-blue-50" : "border-border bg-white hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</div>
+                      <div className="font-mono text-sm">{item.id}</div>
+                      <div className="text-sm">{item.timestamp}</div>
+                      <div className="text-xs text-muted-foreground">distance: {Number(item.distance_km ?? 0).toFixed(1)} km</div>
+                    </button>
+                  );
+                })
+              )}
             </CardContent>
           </Card>
 
-          {/* Run Summary */}
           <Card>
             <CardHeader>
-              <CardTitle>Run Summary</CardTitle>
-              <CardDescription>
-                Configuration and parameters used for this route calculation
-              </CardDescription>
+              <CardTitle>Run Detail</CardTitle>
+              <CardDescription>{selectedItem ? selectedItem.id : "Select an item from left list"}</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {/* Settings */}
-                <div>
-                  <h4 className="mb-3">Settings</h4>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-muted-foreground mb-1">Dataset</div>
-                      <div className="font-medium">July–October 2024</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-muted-foreground mb-1">Timestamp</div>
-                      <div className="font-medium font-mono">2024-08-15 12:00 UTC</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-muted-foreground mb-1">Safety Policy</div>
-                      <div className="font-medium">Blocked = Bathy + U-Net Blocked</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-muted-foreground mb-1">Caution Handling</div>
-                      <div className="font-medium">Tie-breaker (Default)</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-muted-foreground mb-1">AIS Corridor Bias</div>
-                      <div className="font-medium">0.2</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-muted-foreground mb-1">Model Version</div>
-                      <div className="font-medium">U-Net v2.1.3</div>
-                    </div>
-                  </div>
+            <CardContent className="space-y-6">
+              {!selectedItem || loadingDetail ? (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  {loadingDetail ? "Loading detail..." : "No run selected"}
                 </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <StatCard label="Distance" value={Number(selectedItem.distance_km ?? 0).toFixed(1)} unit="km" />
+                    <StatCard label="Caution" value={cautionPct.toFixed(1)} unit="%" variant="warning" />
+                    <StatCard label="Corridor Bias" value={Number(selectedItem.corridor_bias ?? 0).toFixed(2)} />
+                    <StatCard label="Model" value={String(selectedItem.model_version ?? "unet_v1")} />
+                  </div>
 
-                <Separator />
-
-                {/* Route Points */}
-                <div>
-                  <h4 className="mb-3">Route Endpoints</h4>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                      <div className="text-sm text-green-700 mb-1">Start Point</div>
-                      <div className="font-medium font-mono">78.2467°N, 15.4650°E</div>
-                      <div className="text-xs text-muted-foreground mt-1">Longyearbyen, Svalbard</div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-lg border bg-white p-3 text-sm">
+                      <div className="mb-2 text-muted-foreground">Start</div>
+                      <div className="font-mono">
+                        {Number(selectedItem.start?.lat ?? 0).toFixed(4)}, {Number(selectedItem.start?.lon ?? 0).toFixed(4)}
+                      </div>
                     </div>
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <div className="text-sm text-red-700 mb-1">Goal Point</div>
-                      <div className="font-medium font-mono">81.5074°N, 58.3811°E</div>
-                      <div className="text-xs text-muted-foreground mt-1">Franz Josef Land</div>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Metrics */}
-                <div>
-                  <h4 className="mb-3">Route Metrics</h4>
-                  <div className="grid md:grid-cols-4 gap-3">
-                    <StatCard label="Total Distance" value="847" unit="km" />
-                    <StatCard label="Safe Zones" value="78.3" unit="%" variant="success" />
-                    <StatCard label="Caution Zones" value="21.7" unit="%" variant="warning" />
-                    <StatCard label="Corridor Align" value="0.74" variant="success" />
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Validation */}
-                <div>
-                  <h4 className="mb-3">Validation Metrics</h4>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <StatCard label="DTW Distance" value="12.4" unit="km" />
-                    <StatCard label="Hausdorff Dist" value="8.7" unit="km" />
-                    <StatCard label="AIS Overlap" value="74.2" unit="%" variant="success" />
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Status */}
-                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                  <div className="flex items-start gap-3">
-                    <CheckCircle2 className="size-5 text-green-600 mt-0.5" />
-                    <div>
-                      <h4 className="text-green-900 mb-1">Route Calculation Successful</h4>
-                      <p className="text-sm text-green-800">
-                        No safety violations detected. Route successfully avoids all BLOCKED zones 
-                        while minimizing distance under the specified constraints.
-                      </p>
-                      <div className="mt-3 flex gap-4 text-sm text-green-700">
-                        <div>
-                          <span className="text-muted-foreground">Computed:</span> 2024-02-09 14:32:18 UTC
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Duration:</span> 1.47s
-                        </div>
+                    <div className="rounded-lg border bg-white p-3 text-sm">
+                      <div className="mb-2 text-muted-foreground">Goal</div>
+                      <div className="font-mono">
+                        {Number(selectedItem.goal?.lat ?? 0).toFixed(4)}, {Number(selectedItem.goal?.lon ?? 0).toFixed(4)}
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
-          {/* Citation & References */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Citation & References</CardTitle>
-              <CardDescription>
-                Academic attribution for this route planning system
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg font-mono text-sm">
-                <div className="mb-2 text-muted-foreground">BibTeX</div>
-                <code className="text-xs leading-relaxed">
-                  @article&#123;nsr_planning_2024,<br />
-                  &nbsp;&nbsp;title=&#123;Arctic Sea Route Planning with U-Net Safety Predictions&#125;,<br />
-                  &nbsp;&nbsp;author=&#123;...&#125;,<br />
-                  &nbsp;&nbsp;journal=&#123;...&#125;,<br />
-                  &nbsp;&nbsp;year=&#123;2024&#125;<br />
-                  &#125;
-                </code>
-              </div>
+                  <div className="space-y-3">
+                    <div className="text-sm text-muted-foreground">Preview</div>
+                    <div className="overflow-hidden rounded-lg border bg-white">
+                      <img src={imageUrl} alt={`gallery-${selectedItem.id}`} className="h-auto w-full object-contain" />
+                    </div>
+                  </div>
 
-              <div>
-                <h4 className="mb-2">Data Sources</h4>
-                <ul className="text-sm space-y-1 text-muted-foreground">
-                  <li>• AIS vessel tracking data (Norwegian Coastal Administration)</li>
-                  <li>• Bathymetry: GEBCO 2023 Grid</li>
-                  <li>• Ice concentration: EUMETSAT OSI SAF</li>
-                  <li>• Wave/Wind: ECMWF ERA5 Reanalysis</li>
-                </ul>
-              </div>
+                  <Separator />
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleDownloadRoute} className="gap-2">
+                      <FileJson className="size-4" />
+                      Download Route GeoJSON
+                    </Button>
+                    <Button onClick={handleDownloadReport} variant="outline" className="gap-2">
+                      <Download className="size-4" />
+                      Download Report JSON
+                    </Button>
+                    <Button onClick={handleDownloadImage} variant="outline" className="gap-2">
+                      <Image className="size-4" />
+                      Download Image
+                    </Button>
+                    <Button onClick={handleDelete} variant="destructive" className="gap-2">
+                      <Trash2 className="size-4" />
+                      Delete
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -1,4 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/v1";
+const API_ORIGIN = API_BASE.endsWith("/v1") ? API_BASE.slice(0, -3) : API_BASE;
 
 export type LayerInfo = {
   id: string;
@@ -35,6 +36,26 @@ export type RoutePlanResponse = {
     [key: string]: unknown;
   };
   gallery_id: string;
+};
+
+export type GalleryItem = {
+  id: string;
+  created_at: string;
+  timestamp: string;
+  layers: string[];
+  start: { lat: number; lon: number };
+  goal: { lat: number; lon: number };
+  distance_km: number;
+  caution_len_km: number;
+  corridor_bias: number;
+  model_version?: string;
+  route_geojson?: {
+    type: "Feature";
+    geometry: { type: "LineString"; coordinates: [number, number][] };
+    properties: Record<string, unknown>;
+  };
+  explain?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type InferResponse = {
@@ -95,4 +116,30 @@ export async function runInference(payload: { timestamp: string; model_version?:
       model_version: payload.model_version ?? "unet_v1",
     }),
   });
+}
+
+export async function getGalleryList() {
+  return apiFetch<{ items: GalleryItem[] }>("/gallery/list");
+}
+
+export async function getGalleryItem(galleryId: string) {
+  return apiFetch<GalleryItem>(`/gallery/${encodeURIComponent(galleryId)}`);
+}
+
+export async function deleteGalleryItem(galleryId: string) {
+  const res = await fetch(`${API_BASE}/gallery/${encodeURIComponent(galleryId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`HTTP ${res.status}: ${detail}`);
+  }
+}
+
+export function getGalleryImageUrl(galleryId: string): string {
+  return `${API_BASE}/gallery/${encodeURIComponent(galleryId)}/image.png`;
+}
+
+export function getApiOrigin(): string {
+  return API_ORIGIN;
 }
