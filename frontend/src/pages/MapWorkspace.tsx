@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { AlertCircle, CheckCircle2, Navigation } from "lucide-react";
+import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
 
-import { getLayers, getTimestamps, planRoute, type RoutePlanResponse } from "../api/client";
+import { getLayers, getTimestamps, planRoute, runInference, type InferResponse, type RoutePlanResponse } from "../api/client";
 import CoordinateInput from "../components/CoordinateInput";
 import LayerToggle from "../components/LayerToggle";
 import LegendCard from "../components/LegendCard";
@@ -69,6 +69,9 @@ export default function MapWorkspace() {
   const [corridorBias, setCorridorBias] = useState([20]);
   const [routeResult, setRouteResult] = useState<RoutePlanResponse | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [pickTarget, setPickTarget] = useState<"start" | "goal" | null>(null);
+  const [inferring, setInferring] = useState(false);
+  const [inferResult, setInferResult] = useState<InferResponse | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -91,23 +94,27 @@ export default function MapWorkspace() {
     };
   }, [queryTimestamp]);
 
+  const refreshLayerAvailability = useCallback(async (ts: string) => {
+    const res = await getLayers(ts);
+    const nextAvailability = {
+      bathy: res.layers.find((l) => l.id === "bathy")?.available ?? false,
+      ais_heatmap: res.layers.find((l) => l.id === "ais_heatmap")?.available ?? false,
+      unet_pred: res.layers.find((l) => l.id === "unet_pred")?.available ?? false,
+      ice: res.layers.find((l) => l.id === "ice")?.available ?? false,
+      wave: res.layers.find((l) => l.id === "wave")?.available ?? false,
+      wind: res.layers.find((l) => l.id === "wind")?.available ?? false,
+    };
+    setAvailability(nextAvailability);
+  }, []);
+
   useEffect(() => {
     if (!timestamp) return;
     let active = true;
     async function loadLayerAvailability() {
       try {
-        const res = await getLayers(timestamp);
-        if (!active) return;
-        const nextAvailability = {
-          bathy: res.layers.find((l) => l.id === "bathy")?.available ?? false,
-          ais_heatmap: res.layers.find((l) => l.id === "ais_heatmap")?.available ?? false,
-          unet_pred: res.layers.find((l) => l.id === "unet_pred")?.available ?? false,
-          ice: res.layers.find((l) => l.id === "ice")?.available ?? false,
-          wave: res.layers.find((l) => l.id === "wave")?.available ?? false,
-          wind: res.layers.find((l) => l.id === "wind")?.available ?? false,
-        };
-        setAvailability(nextAvailability);
+        await refreshLayerAvailability(timestamp);
       } catch (error) {
+        if (!active) return;
         console.warn("layers api unavailable", error);
       }
     }
@@ -115,7 +122,7 @@ export default function MapWorkspace() {
     return () => {
       active = false;
     };
-  }, [timestamp]);
+  }, [refreshLayerAvailability, timestamp]);
 
   const handleLayerToggle = (layer: keyof LayerStates, enabled: boolean) => {
     setLayers((prev) => ({
@@ -188,15 +195,50 @@ export default function MapWorkspace() {
     }
   };
 
+  const handleRunInference = async () => {
+    if (!timestamp) {
+      toast.error("Timestamp is required");
+      return;
+    }
+    setInferring(true);
+    toast.loading("Running U-Net inference...", { id: "run-infer" });
+    try {
+      const res = await runInference({ timestamp, model_version: "unet_v1" });
+      setInferResult(res);
+      await refreshLayerAvailability(timestamp);
+      toast.success(`Inference done (${res.stats.cache_hit ? "cache hit" : "fresh run"})`, { id: "run-infer" });
+    } catch (error) {
+      toast.error(`Inference failed: ${String(error)}`, { id: "run-infer" });
+    } finally {
+      setInferring(false);
+    }
+  };
+
   const handlePickStart = () => {
+    setPickTarget("start");
     toast.info(t("toast.pickStart"));
   };
 
   const handlePickGoal = () => {
+    setPickTarget("goal");
     toast.info(t("toast.pickGoal"));
   };
 
   const handleMapClick = (lat: number, lon: number) => {
+    if (pickTarget === "start") {
+      setStartLat(lat.toFixed(4));
+      setStartLon(lon.toFixed(4));
+      setPickTarget(null);
+      toast.success(`Start set to ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
+      return;
+    }
+    if (pickTarget === "goal") {
+      setGoalLat(lat.toFixed(4));
+      setGoalLon(lon.toFixed(4));
+      setPickTarget(null);
+      toast.success(`Goal set to ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
+      return;
+    }
     toast.success(`${t("toast.mapClicked")} ${lat.toFixed(4)} degN, ${lon.toFixed(4)} degE`);
   };
 
@@ -360,6 +402,24 @@ export default function MapWorkspace() {
                     <Navigation className="size-4" />
                     {planning ? "Planning..." : t("workspace.planRoute")}
                   </Button>
+                  <Button
+                    onClick={handleRunInference}
+                    variant="outline"
+                    className="w-full gap-2"
+                    size="lg"
+                    disabled={inferring}
+                  >
+                    <Cpu className="size-4" />
+                    {inferring ? "Inferring..." : "Run U-Net Inference"}
+                  </Button>
+                  {inferResult ? (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                      <div className="font-medium mb-1">Latest Inference</div>
+                      <div>safe: {(inferResult.stats.class_ratio.safe * 100).toFixed(1)}%</div>
+                      <div>caution: {(inferResult.stats.class_ratio.caution * 100).toFixed(1)}%</div>
+                      <div>blocked: {(inferResult.stats.class_ratio.blocked * 100).toFixed(1)}%</div>
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             </div>
@@ -376,6 +436,11 @@ export default function MapWorkspace() {
           start={mapStart}
           goal={mapGoal}
         />
+        {pickTarget ? (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-xs text-white">
+            Click map to set {pickTarget === "start" ? "start" : "goal"} point
+          </div>
+        ) : null}
 
         <div className="absolute bottom-4 right-4">
           <LegendCard

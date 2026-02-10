@@ -37,6 +37,21 @@ export type RoutePlanResponse = {
   gallery_id: string;
 };
 
+export type InferResponse = {
+  pred_layer: string;
+  timestamp: string;
+  output_file: string;
+  stats: {
+    shape: number[];
+    class_hist: { safe: number; caution: number; blocked: number };
+    class_ratio: { safe: number; caution: number; blocked: number };
+    cache_hit: boolean;
+    model_version: string;
+    model_summary?: string;
+    device?: string;
+  };
+};
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -69,5 +84,15 @@ export async function planRoute(payload: RoutePlanRequest) {
   return apiFetch<RoutePlanResponse>("/route/plan", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function runInference(payload: { timestamp: string; model_version?: string }) {
+  return apiFetch<InferResponse>("/infer", {
+    method: "POST",
+    body: JSON.stringify({
+      timestamp: payload.timestamp,
+      model_version: payload.model_version ?? "unet_v1",
+    }),
   });
 }

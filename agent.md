@@ -170,3 +170,7 @@
 - 2026-02-10T15:35:47.3796775Z | Upgraded /v1/route/plan from straight-line stub to grid-based constrained planner (A*): blocked = bathy OR unet_blocked, start/goal snapping to nearest navigable cell, optional smoothing, and explain metrics (distance/caution_len/corridor_alignment).
 - 2026-02-10T15:35:47.3796775Z | routes_plan now normalizes timestamp, validates planning errors as HTTP 422, and writes gallery metadata from constrained plan outputs.
 - 2026-02-10T15:35:47.3796775Z | Validation: python -m pytest -q in backend -> 20 passed.
+- 2026-02-10T15:54:15.2016266Z | Frontend integration started for next phase: wired infer endpoint and interactive route workflow in MapWorkspace with API-backed availability refresh.
+- 2026-02-10T15:54:15.2016266Z | Added frontend API client infer call (runInference) and InferResponse types in frontend/src/api/client.ts.
+- 2026-02-10T15:54:15.2016266Z | Updated frontend/src/pages/MapWorkspace.tsx with Run U-Net Inference button, inference stats panel, map click pick mode for start/goal, and improved route/inference toasts.
+- 2026-02-10T15:54:15.2016266Z | Validation: npm run build in frontend succeeded; python -m pytest -q in backend -> 20 passed.
