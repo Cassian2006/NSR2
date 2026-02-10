@@ -42,14 +42,22 @@ class GridGeo:
             idx = np.interp(values, axis, np.arange(axis.size))
         else:
             idx = np.interp(values, axis[::-1], np.arange(axis.size)[::-1])
-        return np.rint(idx).astype(np.int64)
+        return idx.astype(np.float64)
+
+    def row_coords_for_lats(self, lats: np.ndarray) -> np.ndarray:
+        rows = self._idx_from_axis(lats.astype(np.float64), self.lat_axis, self.lat_ascending)
+        return np.clip(rows, 0.0, float(self.h - 1))
+
+    def col_coords_for_lons(self, lons: np.ndarray) -> np.ndarray:
+        cols = self._idx_from_axis(lons.astype(np.float64), self.lon_axis, self.lon_ascending)
+        return np.clip(cols, 0.0, float(self.w - 1))
 
     def rows_for_lats(self, lats: np.ndarray) -> np.ndarray:
-        rows = self._idx_from_axis(lats.astype(np.float64), self.lat_axis, self.lat_ascending)
+        rows = np.rint(self.row_coords_for_lats(lats)).astype(np.int64)
         return np.clip(rows, 0, self.h - 1)
 
     def cols_for_lons(self, lons: np.ndarray) -> np.ndarray:
-        cols = self._idx_from_axis(lons.astype(np.float64), self.lon_axis, self.lon_ascending)
+        cols = np.rint(self.col_coords_for_lons(lons)).astype(np.int64)
         return np.clip(cols, 0, self.w - 1)
 
     def latlon_to_rc(self, lat: float, lon: float) -> tuple[int, int, bool]:
@@ -89,6 +97,10 @@ def _load_axes_from_meta(meta_path: Path, h: int, w: int) -> tuple[np.ndarray, n
     target_lat = np.asarray(meta.get("target_lat", []), dtype=np.float64)
     target_lon = np.asarray(meta.get("target_lon", []), dtype=np.float64)
     if target_lat.ndim == 1 and target_lon.ndim == 1 and target_lat.size == h and target_lon.size == w:
+        # Raster rows are expected to run top->bottom from high-lat to low-lat.
+        # Some metadata stores ascending latitude values; flip to match row order.
+        if target_lat[0] < target_lat[-1]:
+            target_lat = target_lat[::-1].copy()
         return target_lat, target_lon
 
     aoi_lat = meta.get("aoi_lat")
@@ -101,7 +113,7 @@ def _load_axes_from_meta(meta_path: Path, h: int, w: int) -> tuple[np.ndarray, n
     ):
         lat0, lat1 = float(aoi_lat[0]), float(aoi_lat[1])
         lon0, lon1 = float(aoi_lon[0]), float(aoi_lon[1])
-        lat_axis = np.linspace(lat0, lat1, h, dtype=np.float64)
+        lat_axis = np.linspace(max(lat0, lat1), min(lat0, lat1), h, dtype=np.float64)
         lon_axis = np.linspace(lon0, lon1, w, dtype=np.float64)
         return lat_axis, lon_axis
 
@@ -130,6 +142,8 @@ def _load_geo_cached(
             lat_axis = np.load(lat_path)
             lon_axis = np.load(lon_path)
             if lat_axis.ndim == 1 and lon_axis.ndim == 1 and lat_axis.size == h and lon_axis.size == w:
+                if lat_axis[0] < lat_axis[-1]:
+                    lat_axis = lat_axis[::-1].copy()
                 return GridGeo(lat_axis=lat_axis, lon_axis=lon_axis)
         except Exception:
             pass

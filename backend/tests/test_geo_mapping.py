@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import numpy as np
 
 from app.core.config import Settings
@@ -59,3 +60,35 @@ def test_load_grid_geo_fallback_to_configured_bounds(tmp_path) -> None:
     assert geo.bounds.lat_max == 85.0
     assert geo.bounds.lon_min == -160.0
     assert geo.bounds.lon_max == 170.0
+
+
+def test_load_grid_geo_flips_meta_target_lat_to_descending(tmp_path) -> None:
+    ts = "2024-07-03_00"
+    pack = tmp_path / ts
+    pack.mkdir(parents=True, exist_ok=True)
+    (pack / "meta.json").write_text(
+        json.dumps(
+            {
+                "target_lat": [60.0, 70.0, 80.0],
+                "target_lon": [20.0, 30.0, 40.0, 50.0],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = Settings(
+        annotation_pack_root=tmp_path,
+        env_grids_root=tmp_path / "env_grids",
+        grid_lat_min=60.0,
+        grid_lat_max=86.0,
+        grid_lon_min=-180.0,
+        grid_lon_max=180.0,
+    )
+    geo = load_grid_geo(settings, timestamp=ts, shape=(3, 4))
+    assert geo.lat_axis.tolist() == [80.0, 70.0, 60.0]
+    assert geo.lon_axis.tolist() == [20.0, 30.0, 40.0, 50.0]
+
+    r, c, inside = geo.latlon_to_rc(79.9, 20.1)
+    assert inside
+    assert r == 0
+    assert c == 0

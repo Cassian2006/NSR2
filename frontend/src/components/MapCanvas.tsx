@@ -4,6 +4,7 @@ import {
   MapContainer,
   Pane,
   Polyline,
+  Rectangle,
   TileLayer,
   useMapEvents,
 } from "react-leaflet";
@@ -34,6 +35,10 @@ interface MapCanvasProps {
 
 const API_ORIGIN = getApiOrigin();
 const INITIAL_BOUNDS: LatLngBoundsExpression = [
+  [60, 20],
+  [80, 180],
+];
+const AOI_BOUNDS: LatLngBoundsExpression = [
   [60, 20],
   [80, 180],
 ];
@@ -112,6 +117,19 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
           attribution="&copy; OpenStreetMap contributors"
           noWrap
         />
+
+        <Pane name="aoi-frame" style={{ zIndex: 390 }}>
+          <Rectangle
+            bounds={AOI_BOUNDS}
+            pathOptions={{
+              color: "#0ea5e9",
+              weight: 2,
+              opacity: 0.95,
+              fill: false,
+              dashArray: "8 6",
+            }}
+          />
+        </Pane>
 
         <MapEvents
           onMapClick={onMapClick}

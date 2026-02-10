@@ -138,23 +138,72 @@ def _sample_grid_from_axes(
     lons: np.ndarray,
     *,
     geo: GridGeo,
+    mode: str = "nearest",
 ) -> tuple[np.ndarray, np.ndarray]:
     b = geo.bounds
     lat_in = (lats >= b.lat_min) & (lats <= b.lat_max)
     lon_in = (lons >= b.lon_min) & (lons <= b.lon_max)
     inside = lat_in[:, None] & lon_in[None, :]
 
-    row = geo.rows_for_lats(lats)
-    col = geo.cols_for_lons(lons)
+    if mode == "nearest":
+        row = geo.rows_for_lats(lats)
+        col = geo.cols_for_lons(lons)
+        sampled = data[np.ix_(row, col)]
+        return sampled, inside
 
-    sampled = data[np.ix_(row, col)]
+    if mode != "bilinear":
+        raise ValueError(f"Unsupported sampling mode: {mode}")
+
+    row_f = geo.row_coords_for_lats(lats)
+    col_f = geo.col_coords_for_lons(lons)
+    r0 = np.floor(row_f).astype(np.int64)
+    c0 = np.floor(col_f).astype(np.int64)
+    r1 = np.clip(r0 + 1, 0, data.shape[0] - 1)
+    c1 = np.clip(c0 + 1, 0, data.shape[1] - 1)
+    dr = (row_f - r0).astype(np.float32)
+    dc = (col_f - c0).astype(np.float32)
+
+    v00 = data[np.ix_(r0, c0)].astype(np.float32)
+    v01 = data[np.ix_(r0, c1)].astype(np.float32)
+    v10 = data[np.ix_(r1, c0)].astype(np.float32)
+    v11 = data[np.ix_(r1, c1)].astype(np.float32)
+
+    w00 = (1.0 - dr)[:, None] * (1.0 - dc)[None, :]
+    w01 = (1.0 - dr)[:, None] * dc[None, :]
+    w10 = dr[:, None] * (1.0 - dc)[None, :]
+    w11 = dr[:, None] * dc[None, :]
+
+    finite00 = np.isfinite(v00)
+    finite01 = np.isfinite(v01)
+    finite10 = np.isfinite(v10)
+    finite11 = np.isfinite(v11)
+
+    num = np.zeros_like(v00, dtype=np.float32)
+    den = np.zeros_like(v00, dtype=np.float32)
+    num += np.where(finite00, v00 * w00, 0.0)
+    den += np.where(finite00, w00, 0.0)
+    num += np.where(finite01, v01 * w01, 0.0)
+    den += np.where(finite01, w01, 0.0)
+    num += np.where(finite10, v10 * w10, 0.0)
+    den += np.where(finite10, w10, 0.0)
+    num += np.where(finite11, v11 * w11, 0.0)
+    den += np.where(finite11, w11, 0.0)
+    sampled = np.divide(num, den, out=np.full_like(num, np.nan, dtype=np.float32), where=den > 0)
     return sampled, inside
 
 
-def _sample_grid(data: np.ndarray, bbox: BBox, out_w: int, out_h: int, *, geo: GridGeo) -> tuple[np.ndarray, np.ndarray]:
+def _sample_grid(
+    data: np.ndarray,
+    bbox: BBox,
+    out_w: int,
+    out_h: int,
+    *,
+    geo: GridGeo,
+    mode: str = "nearest",
+) -> tuple[np.ndarray, np.ndarray]:
     lats = np.linspace(bbox.max_lat, bbox.min_lat, out_h, dtype=np.float64)
     lons = np.linspace(bbox.min_lon, bbox.max_lon, out_w, dtype=np.float64)
-    return _sample_grid_from_axes(data, lats, lons, geo=geo)
+    return _sample_grid_from_axes(data, lats, lons, geo=geo, mode=mode)
 
 
 def _empty_image(w: int, h: int) -> np.ndarray:
@@ -294,7 +343,15 @@ def render_overlay_png(
         return _encode_png_rgba(_empty_image(width, height))
 
     geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
-    sampled, inside = _sample_grid(grid.astype(np.float32), bbox, width, height, geo=geo)
+    sampling_mode = "nearest" if layer in {"bathy", "unet_pred"} else "bilinear"
+    sampled, inside = _sample_grid(
+        grid.astype(np.float32),
+        bbox,
+        width,
+        height,
+        geo=geo,
+        mode=sampling_mode,
+    )
 
     if layer == "bathy":
         image = _render_bathy(sampled, inside)
@@ -302,7 +359,14 @@ def render_overlay_png(
         bathy_sampled = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
         if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
-            bathy_sampled, _ = _sample_grid(bathy_grid.astype(np.float32), bbox, width, height, geo=geo)
+            bathy_sampled, _ = _sample_grid(
+                bathy_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
         image = _render_unet(
             np.rint(sampled).astype(np.int16),
             inside,
@@ -366,7 +430,14 @@ def render_tile_png(
 
     geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
     lats, lons = _tile_pixel_latlon_axes(z=z, x=x, y=y, tile_size=tile_size)
-    sampled, inside = _sample_grid_from_axes(grid.astype(np.float32), lats, lons, geo=geo)
+    sampling_mode = "nearest" if layer in {"bathy", "unet_pred"} else "bilinear"
+    sampled, inside = _sample_grid_from_axes(
+        grid.astype(np.float32),
+        lats,
+        lons,
+        geo=geo,
+        mode=sampling_mode,
+    )
 
     if layer == "bathy":
         image = _render_bathy(sampled, inside)
@@ -374,7 +445,13 @@ def render_tile_png(
         bathy_sampled = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
         if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
-            bathy_sampled, _ = _sample_grid_from_axes(bathy_grid.astype(np.float32), lats, lons, geo=geo)
+            bathy_sampled, _ = _sample_grid_from_axes(
+                bathy_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
         image = _render_unet(
             np.rint(sampled).astype(np.int16),
             inside,

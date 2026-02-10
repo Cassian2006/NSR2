@@ -256,3 +256,9 @@
 - 2026-02-10T18:03:18.2050884+00:00 | Validation: python -m pytest -q (backend) -> 34 passed.
 - 2026-02-10T18:04:38.5979151+00:00 | Exported per-timestamp blocked/caution audit report to outputs/qa/blocked_caution_audit.json (492 samples; includes class ratios and caution-overlap metrics).
 - 2026-02-10T18:04:38.5979151+00:00 | Restarted backend runtime at http://127.0.0.1:8001 and verified health endpoint returns {"status":"ok"}.
+- 2026-02-10T18:10:25.1707301+00:00 | Investigated map-layer misalignment: diagnosed latitude-axis inversion from metadata (target_lat ascending 60->80 while raster rows are north->south), causing bathy/UNet/heatmap vertical flip symptoms.
+- 2026-02-10T18:10:25.1707301+00:00 | Updated backend/app/core/geo.py to normalize metadata latitude axes to descending order and to build AOI fallback latitude axis as max->min.
+- 2026-02-10T18:10:25.1707301+00:00 | Enhanced backend/app/core/render.py sampling: kept nearest-neighbor for categorical layers (bathy/unet), added bilinear interpolation for continuous layers (ais/ice/wave/wind) to reduce block artifacts.
+- 2026-02-10T18:10:25.1707301+00:00 | Added AOI framing rectangle on map in frontend/src/components/MapCanvas.tsx so users can see the NSR data extent over basemap.
+- 2026-02-10T18:10:25.1707301+00:00 | Added regression tests backend/tests/test_render_sampling.py and extended backend/tests/test_geo_mapping.py for metadata latitude normalization behavior.
+- 2026-02-10T18:10:25.1707301+00:00 | Validation: python -m pytest -q (backend) -> 37 passed; npm run build (frontend) succeeded; backend /healthz OK after restart.
