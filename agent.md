@@ -450,3 +450,5 @@ pm run build in frontend (pass).
 - 2026-02-11T11:43:28+00:00 | Updated DEPLOY_RENDER.md with built-in demo data behavior and troubleshooting guidance (sample_count=4 indicates demo mode).
 - 2026-02-11T11:43:28+00:00 | Validation: python -m pytest -q in backend -> 68 passed; npm run build in frontend succeeded.
 
+- 2026-02-11T11:46:39+00:00 | Committed eb673c6: ship Render demo dataset subset + Docker default demo data paths + settings path-derivation fix + config regression test.
+- 2026-02-11T11:46:39+00:00 | Pushed eb673c6 to origin/main for Render redeploy.
