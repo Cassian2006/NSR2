@@ -459,3 +459,5 @@ pm run build in frontend (pass).
 - 2026-02-11T12:11:34+00:00 | Updated DEPLOY_RENDER.md with NSR_DISABLE_TORCH guidance and OOM troubleshooting notes.
 - 2026-02-11T12:11:34+00:00 | Test updates: backend/tests/test_config_paths.py adjusted for fallback behavior and added demo fallback coverage.
 - 2026-02-11T12:11:34+00:00 | Validation: python -m pytest -q in backend -> 69 passed; npm run build in frontend succeeded.
+- 2026-02-11T12:34:49Z | Local map refresh stability fix: added h-full root in frontend/src/pages/MapWorkspace.tsx and strengthened Leaflet resize recovery in frontend/src/components/MapCanvas.tsx (retry invalidateSize + whenReady).
+- 2026-02-11T12:34:49Z | Pre-submit validation: python -m pytest -q in backend -> 69 passed; npm run build in frontend succeeded.

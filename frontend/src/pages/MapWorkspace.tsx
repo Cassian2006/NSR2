@@ -611,7 +611,7 @@ export default function MapWorkspace() {
   };
 
   return (
-    <div className="relative bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
+    <div className="relative h-full bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
       <div className="absolute right-3 top-3 z-50 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-md backdrop-blur-sm">
         <div className="mb-1 text-[11px] text-slate-600">布局</div>
         <div className="flex gap-1">

@@ -108,6 +108,18 @@ function MapResizeGuard({ layoutKey }: { layoutKey: string }) {
     const t1 = window.setTimeout(refresh, 0);
     const t2 = window.setTimeout(refresh, 180);
     const t3 = window.setTimeout(refresh, 520);
+    let attempts = 0;
+    const retry = window.setInterval(() => {
+      attempts += 1;
+      const size = map.getSize();
+      refresh();
+      if ((size.x > 0 && size.y > 0) || attempts >= 8) {
+        window.clearInterval(retry);
+      }
+    }, 350);
+    map.whenReady(() => {
+      refresh();
+    });
     window.addEventListener("resize", refresh, { passive: true });
     window.addEventListener("orientationchange", refresh, { passive: true });
     const viewport = window.visualViewport;
@@ -116,6 +128,7 @@ function MapResizeGuard({ layoutKey }: { layoutKey: string }) {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       window.clearTimeout(t3);
+      window.clearInterval(retry);
       window.removeEventListener("resize", refresh);
       window.removeEventListener("orientationchange", refresh);
       viewport?.removeEventListener("resize", refresh);
