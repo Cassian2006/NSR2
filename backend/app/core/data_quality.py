@@ -135,17 +135,26 @@ def build_data_quality_report(
         }
     )
 
+    pred_cov = float(pred_present / ts_count)
+    unc_cov = float(unc_present / ts_count)
+    ais_cov = float(ais_present / ts_count)
+    aux_status = _status(ais_cov)
+    # U-Net pred/uncertainty can be generated lazily on demand in current pipeline.
+    # Treat low precomputed coverage as warn instead of fail when AIS layer is healthy.
+    if aux_status == "pass" and (pred_cov < 0.3 or unc_cov < 0.2):
+        aux_status = "warn"
     checks.append(
         {
             "name": "auxiliary_layers_coverage",
-            "status": _status(min(pred_present, ais_present) / ts_count),
+            "status": aux_status,
             "detail": {
                 "pred_present": pred_present,
                 "uncertainty_present": unc_present,
                 "ais_present": ais_present,
-                "pred_coverage": round(float(pred_present / ts_count), 4),
-                "uncertainty_coverage": round(float(unc_present / ts_count), 4),
-                "ais_coverage": round(float(ais_present / ts_count), 4),
+                "pred_coverage": round(pred_cov, 4),
+                "uncertainty_coverage": round(unc_cov, 4),
+                "ais_coverage": round(ais_cov, 4),
+                "note": "low pred/unc coverage is warning-only when AIS coverage is high (on-demand inference supported)",
             },
         }
     )
@@ -188,6 +197,8 @@ def build_data_quality_report(
     # Numeric quality sampling.
     sample_ts = _pick_sample_timestamps(timestamps, max(8, int(sample_limit)))
     nan_ratios = []
+    sea_nan_ratios = []
+    land_nan_ratios = []
     blocked_ratios = []
     channel_counts = []
     for ts in sample_ts:
@@ -204,15 +215,34 @@ def build_data_quality_report(
         if x.ndim == 3:
             channel_counts.append(int(x.shape[0]))
             nan_ratios.append(float(1.0 - np.mean(np.isfinite(x))))
+            if b.ndim == 2 and b.shape == x.shape[1:]:
+                sea_mask = b <= 0
+                land_mask = b > 0
+                if np.any(sea_mask):
+                    sea_nan_ratios.append(float(1.0 - np.mean(np.isfinite(x[:, sea_mask]))))
+                if np.any(land_mask):
+                    land_nan_ratios.append(float(1.0 - np.mean(np.isfinite(x[:, land_mask]))))
         if b.ndim == 2:
             blocked_ratios.append(float(np.mean(b > 0)))
     nan_mean = float(np.mean(nan_ratios)) if nan_ratios else math.inf
     nan_p95 = float(np.percentile(nan_ratios, 95)) if nan_ratios else math.inf
+    sea_nan_mean = float(np.mean(sea_nan_ratios)) if sea_nan_ratios else math.inf
+    sea_nan_p95 = float(np.percentile(sea_nan_ratios, 95)) if sea_nan_ratios else math.inf
+    land_nan_mean = float(np.mean(land_nan_ratios)) if land_nan_ratios else math.inf
+    land_nan_p95 = float(np.percentile(land_nan_ratios, 95)) if land_nan_ratios else math.inf
     blocked_mean = float(np.mean(blocked_ratios)) if blocked_ratios else 0.0
     channel_var = len(set(channel_counts))
     numeric_score = 1.0
-    if not np.isfinite(nan_mean) or nan_p95 > 0.3:
+    if not np.isfinite(nan_mean) or not np.isfinite(nan_p95):
+        numeric_score = 0.0
+    elif nan_p95 > 0.6:
         numeric_score *= 0.5
+    elif nan_p95 > 0.4:
+        numeric_score *= 0.75
+    elif nan_p95 > 0.3:
+        numeric_score *= 0.9
+    if np.isfinite(sea_nan_p95) and sea_nan_p95 > 0.65:
+        numeric_score *= 0.8
     if channel_var > 1:
         numeric_score *= 0.7
     checks.append(
@@ -223,6 +253,10 @@ def build_data_quality_report(
                 "sampled_timestamps": len(sample_ts),
                 "nan_ratio_mean": round(nan_mean, 6) if np.isfinite(nan_mean) else None,
                 "nan_ratio_p95": round(nan_p95, 6) if np.isfinite(nan_p95) else None,
+                "sea_nan_ratio_mean": round(sea_nan_mean, 6) if np.isfinite(sea_nan_mean) else None,
+                "sea_nan_ratio_p95": round(sea_nan_p95, 6) if np.isfinite(sea_nan_p95) else None,
+                "land_nan_ratio_mean": round(land_nan_mean, 6) if np.isfinite(land_nan_mean) else None,
+                "land_nan_ratio_p95": round(land_nan_p95, 6) if np.isfinite(land_nan_p95) else None,
                 "blocked_ratio_mean": round(blocked_mean, 6),
                 "channel_count_variants": channel_var,
                 "channel_count_values": sorted(list(set(channel_counts)))[:10],

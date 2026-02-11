@@ -19,12 +19,14 @@ No `Build Command` or `Start Command` needed; Dockerfile handles both.
 ## 3. Environment Variables
 Defaults in Docker image:
 
-- `NSR_DATA_ROOT=/app/backend/demo_data`
-- `NSR_OUTPUTS_ROOT=/app/backend/demo_outputs`
+- `NSR_DATA_ROOT=/app/data`
+- `NSR_OUTPUTS_ROOT=/app/outputs`
+- `NSR_ALLOW_DEMO_FALLBACK=0`
 
-This means a small built-in demo dataset is available even on free Render without disks.
+This is production-first: service uses full dataset mount paths by default and will not silently fall back to demo data.
 
-If `NSR_DATA_ROOT` points to an empty/non-existent path, backend now auto-falls back to bundled `backend/demo_data`.
+If you still want free-tier demo fallback behavior, set:
+- `NSR_ALLOW_DEMO_FALLBACK=1`
 
 Optional for same-domain deployment:
 - `NSR_CORS_ORIGIN_REGEX=^https://.*\.onrender\.com$`
@@ -59,7 +61,7 @@ For `latest` live Copernicus pull, set:
 If base map appears but overlay layers are empty or `U-Net` shows as missing:
 1. Open `GET /v1/datasets` and check `sample_count`:
    - `0` means your runtime dataset path is empty/unreachable.
-   - `8` means you are using the built-in demo pack.
+   - `>0` means samples are discoverable from your configured dataset root.
 2. Ensure `NSR_DATA_ROOT` points to a mounted disk path that contains:
    - `processed/annotation_pack/<timestamp>/x_stack.npy`
    - `processed/annotation_pack/<timestamp>/blocked_mask.npy`

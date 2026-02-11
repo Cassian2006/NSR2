@@ -18,6 +18,7 @@ import { useLanguage } from "../contexts/LanguageContext";
 
 interface MapCanvasProps {
   timestamp: string;
+  tileRevision?: number;
   layoutKey?: string;
   layers: {
     bathymetry: { enabled: boolean; opacity: number };
@@ -53,23 +54,24 @@ function RasterTileLayer({
   enabled,
   opacity,
   timestamp,
+  tileRevision,
   zIndex,
 }: {
   layerId: string;
   enabled: boolean;
   opacity: number;
   timestamp: string;
+  tileRevision: number;
   zIndex: number;
 }) {
   if (!enabled || !timestamp) return null;
   const paneName = `overlay-${layerId}`;
-  const url = `${API_ORIGIN}/v1/tiles/${layerId}/{z}/{x}/{y}.png?timestamp=${encodeURIComponent(timestamp)}&v=${encodeURIComponent(
-    timestamp
-  )}`;
+  const rev = `${timestamp}-${tileRevision}`;
+  const url = `${API_ORIGIN}/v1/tiles/${layerId}/{z}/{x}/{y}.png?timestamp=${encodeURIComponent(timestamp)}&v=${encodeURIComponent(rev)}`;
   return (
     <Pane name={paneName} style={{ zIndex }}>
       <TileLayer
-        key={`${layerId}-${timestamp}`}
+        key={`${layerId}-${rev}`}
         pane={paneName}
         url={url}
         opacity={Math.max(0, Math.min(1, opacity / 100))}
@@ -138,7 +140,17 @@ function MapResizeGuard({ layoutKey }: { layoutKey: string }) {
   return null;
 }
 
-export default function MapCanvas({ timestamp, layoutKey = "auto", layers, showRoute, routeGeojson, start, goal, onMapClick }: MapCanvasProps) {
+export default function MapCanvas({
+  timestamp,
+  tileRevision = 0,
+  layoutKey = "auto",
+  layers,
+  showRoute,
+  routeGeojson,
+  start,
+  goal,
+  onMapClick,
+}: MapCanvasProps) {
   const { t } = useLanguage();
   const [mousePos, setMousePos] = useState({ lat: 79.234, lon: 45.678 });
   const mouseRafRef = useRef<number | null>(null);
@@ -174,6 +186,7 @@ export default function MapCanvas({ timestamp, layoutKey = "auto", layers, showR
   return (
     <div className="absolute inset-0">
       <MapContainer
+        key={`map-${layoutKey}-${timestamp}`}
         bounds={INITIAL_BOUNDS}
         className="h-full w-full"
         zoomSnap={0.25}
@@ -207,13 +220,13 @@ export default function MapCanvas({ timestamp, layoutKey = "auto", layers, showR
           onMouseMove={handleMouseMove}
         />
 
-        <RasterTileLayer layerId="bathy" enabled={layers.bathymetry.enabled} opacity={layers.bathymetry.opacity} timestamp={timestamp} zIndex={300} />
-        <RasterTileLayer layerId="ice" enabled={layers.ice.enabled} opacity={layers.ice.opacity} timestamp={timestamp} zIndex={320} />
-        <RasterTileLayer layerId="wave" enabled={layers.wave.enabled} opacity={layers.wave.opacity} timestamp={timestamp} zIndex={330} />
-        <RasterTileLayer layerId="wind" enabled={layers.wind.enabled} opacity={layers.wind.opacity} timestamp={timestamp} zIndex={340} />
-        <RasterTileLayer layerId="ais_heatmap" enabled={layers.aisHeatmap.enabled} opacity={layers.aisHeatmap.opacity} timestamp={timestamp} zIndex={360} />
-        <RasterTileLayer layerId="unet_uncertainty" enabled={layers.unetUncertainty.enabled} opacity={layers.unetUncertainty.opacity} timestamp={timestamp} zIndex={370} />
-        <RasterTileLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} zIndex={380} />
+        <RasterTileLayer layerId="bathy" enabled={layers.bathymetry.enabled} opacity={layers.bathymetry.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={300} />
+        <RasterTileLayer layerId="ice" enabled={layers.ice.enabled} opacity={layers.ice.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={320} />
+        <RasterTileLayer layerId="wave" enabled={layers.wave.enabled} opacity={layers.wave.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={330} />
+        <RasterTileLayer layerId="wind" enabled={layers.wind.enabled} opacity={layers.wind.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={340} />
+        <RasterTileLayer layerId="ais_heatmap" enabled={layers.aisHeatmap.enabled} opacity={layers.aisHeatmap.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={360} />
+        <RasterTileLayer layerId="unet_uncertainty" enabled={layers.unetUncertainty.enabled} opacity={layers.unetUncertainty.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={370} />
+        <RasterTileLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={380} />
 
         {showRoute && routeLatLng.length >= 2 ? (
           <Polyline positions={routeLatLng} pathOptions={{ color: "#1e40af", weight: 4, opacity: 0.95 }} />

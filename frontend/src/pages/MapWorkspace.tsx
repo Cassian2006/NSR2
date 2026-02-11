@@ -90,6 +90,7 @@ export default function MapWorkspace() {
   const [routeResult, setRouteResult] = useState<RoutePlanResponse | null>(null);
   const [planning, setPlanning] = useState(false);
   const [latestPlanning, setLatestPlanning] = useState(false);
+  const [tileRevision, setTileRevision] = useState(0);
   const [pickTarget, setPickTarget] = useState<"start" | "goal" | null>(null);
   const [inferring, setInferring] = useState(false);
   const [inferResult, setInferResult] = useState<InferResponse | null>(null);
@@ -212,6 +213,7 @@ export default function MapWorkspace() {
       wind: res.layers.find((l) => l.id === "wind")?.available ?? false,
     };
     setAvailability(nextAvailability);
+    setTileRevision((prev) => prev + 1);
   }, []);
 
   useEffect(() => {
@@ -568,8 +570,8 @@ export default function MapWorkspace() {
 
   const pageStyle: CSSProperties = useDesktopLayout
     ? {
-        minHeight: "100%",
-        height: "100%",
+        minHeight: "100dvh",
+        height: "100dvh",
         overflow: "hidden",
       }
     : {
@@ -937,9 +939,10 @@ export default function MapWorkspace() {
       </div>
 
       <div className="relative" style={mapPaneStyle} ref={mapCaptureRef}>
-        <div className="relative h-full w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md">
+        <div className="relative h-full w-full min-h-[360px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md">
           <MapCanvas
             timestamp={timestamp}
+            tileRevision={tileRevision}
             layoutKey={mapLayoutKey}
             layers={layers}
             showRoute={Boolean(routeResult)}

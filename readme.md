@@ -1,273 +1,195 @@
 # NSR 避险航线规划系统（当前实现说明）
 
-最后更新：2026-02-10  
-技术栈（当前代码）：React + Vite + FastAPI + Python
+最后更新：2026-02-11  
+技术栈：React + Vite + FastAPI + Python
 
 ---
 
-## 0. 目标与边界
+## 1. 项目目标
+在给定时间片下，基于环境网格（冰/浪/风）、水深禁行、AIS 走廊热力图与 U-Net 分区结果，完成：
 
-在给定时间片（2024-07 ~ 2024-10）下，基于以下数据进行北极航线规划：
-
-- 环境网格（冰/风/浪）
-- 水深与陆地禁行信息（blocked mask）
-- AIS 走廊热力图（软偏好）
-- U-Net 分割结果（SAFE/CAUTION/BLOCKED）
-
-系统目标：
-
-- 图层浏览（多图层、透明度、取值与可视化）
-- 起终点交互选取并规划路线
-- 规划结果自动落到 Gallery
-- Gallery 支持查看、下载、删除
-- 路线可做 AIS 回测评估（第一版）
+- 多图层地图展示与叠加
+- 起终点交互式选取与路线规划
+- 路线结果可解释（距离/风险/走廊贴合）
+- 规划结果落盘到 Gallery（含截图）
+- AIS 回测指标输出
 
 ---
 
-## 1. 当前实现状态
+## 2. 当前功能完成度
 
-### 已完成
+### 后端接口（已可用）
+- `GET /healthz`
+- `GET /v1/datasets`
+- `GET /v1/datasets/quality`
+- `GET /v1/timestamps`
+- `GET /v1/layers`
+- `GET /v1/overlay/{layer}.png`
+- `GET /v1/tiles/{layer}/{z}/{x}/{y}.png`
+- `POST /v1/infer`
+- `POST /v1/route/plan`
+- `POST /v1/route/plan/dynamic`
+- `POST /v1/latest/plan`
+- `GET /v1/latest/progress`
+- `GET /v1/latest/runtime`
+- `GET /v1/latest/sources/health`
+- `GET/POST /v1/latest/copernicus/config`
+- `GET /v1/latest/status`
+- `GET /v1/gallery/list`
+- `GET /v1/gallery/{id}`
+- `GET /v1/gallery/{id}/image.png`
+- `POST /v1/gallery/{id}/image`
+- `DELETE /v1/gallery/{id}`
+- `POST /v1/eval/ais/backtest`
 
-- 后端核心接口：`/v1/datasets`、`/v1/timestamps`、`/v1/layers`
-- 图层渲染：`/v1/overlay/{layer}.png`、`/v1/tiles/{layer}/{z}/{x}/{y}.png`
-- U-Net 推理接口：`/v1/infer`（支持结果缓存）
-- 路线规划接口：`/v1/route/plan`（A* 网格规划）
-- Gallery 接口：列表、详情、图片、删除、前端截图上传
-- AIS 回测接口：`/v1/eval/ais/backtest`
-- 前端页面：场景选择、地图工作台、Gallery/Export
+### 前端页面（已可用）
+- `ScenarioSelector`：场景与时间片选择
+- `MapWorkspace`：地图工作台、图层控制、规划、推理、latest 进度条
+- `ExportReport`：Gallery 浏览、下载、删除、AIS 回测
 
-### 进行中/待优化
-
-- 经纬度到网格的映射当前仍是规则网格映射（通过配置边界），尚未接入真实仿射变换参数文件
-- 规划平滑策略为简化版，后续可升级 line-of-sight + 曲率约束
-- 前端打包体积偏大（Vite 警告 > 500KB），后续可拆包优化
-
----
-
-## 2. 技术栈（与代码一致）
-
-- 前端：React 18并发渲染 + Vite + TypeScript + Leaflet地图
-- 后端：FastAPI + Uvicorn服务器框架/
-- 算法与模型：Python + NumPy + PyTorch（TinyUNet 推理）
-- 数据存储：`npy` + `json`
-
----
-
-## 3. 数据约定
-
-### 3.1 栅格与坐标
-
-- 当前默认网格边界（可配置）：
-  - `grid_lat_min=60.0`
-  - `grid_lat_max=86.0`
-  - `grid_lon_min=-180.0`
-  - `grid_lon_max=180.0`
-- 所有核心网格默认按同一 `H x W` 对齐处理
-
-### 3.2 关键文件（annotation pack）
-
-每个时间片目录（如 `data/processed/annotation_pack/2024-07-01_00/`）包含：
-
-- `x_stack.npy`：多通道输入，形状 `(C,H,W)`
-- `blocked_mask.npy`：禁行掩膜，形状 `(H,W)`，`0/1`
-- `y_class.npy` 或相关标签文件（按训练流程使用）
-- `meta.json`：通道名、shape、规则说明
-
-### 3.3 类别编码
-
-- `0 = SAFE`
-- `1 = CAUTION`
-- `2 = BLOCKED`
+### 规划算法（已集成）
+- A*（基线）
+- D* Lite（静态 + 动态增量重规划）
+- Any-Angle / Theta*
+- Hybrid A*
 
 ---
 
-## 4. 目录结构（当前）
+## 3. 本轮关键更新（已落地）
+
+### 地图与图层稳定性
+- 修复地图刷新后可能空白的问题：桌面布局高度改为 `100dvh`，地图容器增加最小高度保护。
+- 修复图层“看似缺失”问题：新增瓦片版本号 `tileRevision`，避免浏览器缓存旧透明瓦片。
+- `MapContainer` 在布局/时间片切换时安全重建，避免 Leaflet 尺寸不同步。
+
+### 部署数据策略
+- Docker 默认切为全量数据优先：
+  - `NSR_DATA_ROOT=/app/data`
+  - `NSR_OUTPUTS_ROOT=/app/outputs`
+  - `NSR_ALLOW_DEMO_FALLBACK=0`
+- 不再默认静默回退 demo 数据，避免线上误用压缩样本。
+
+### 数据质量报告规则
+- 质量规则已调优，避免把“按需推理”场景误判为失败：
+  - `auxiliary_layers_coverage`：AIS 覆盖高时，`pred/uncertainty` 低覆盖记为 `WARN` 而非 `FAIL`
+  - `numeric_quality_sampled`：增加海域/陆地 NaN 统计，使用分级阈值
+
+---
+
+## 4. 数据质量现状（当前数据集）
+
+- 总体状态：`WARN`（原先 `FAIL` 已修正为更真实评估）
+- 时间片数量：`493`
+- 时间范围：`2024-07-01_00` -> `2025-02-02_12`
+- 当前告警项（2）：
+  - `auxiliary_layers_coverage`
+  - `numeric_quality_sampled`
+
+说明：这两个告警不阻塞系统运行，属于“生产可运行 + 需要持续优化”状态。
+
+---
+
+## 5. 目录结构（核心）
 
 ```text
-repo/
+NSR2/
   backend/
     app/
       api/
-        routes_layers.py
-        routes_infer.py
-        routes_plan.py
-        routes_gallery.py
-        routes_eval.py
       core/
-        config.py
-        dataset.py
-        gallery.py
-        render.py
-        schemas.py
       eval/
-        compare_ais.py
       model/
-        infer.py
-        tiny_unet.py
       planning/
-        router.py
       main.py
     tests/
+    requirements.txt
   frontend/
     src/
       pages/
-        ScenarioSelector.tsx
-        MapWorkspace.tsx
-        ExportReport.tsx
       components/
-        MapCanvas.tsx
       api/
-        client.ts
   data/
   outputs/
-    pred/
-    gallery/
+  Dockerfile
+  DEPLOY_RENDER.md
   readme.md
   agent.md
 ```
 
 ---
 
-## 5. 后端 API
+## 6. 本地运行
 
-### 5.1 数据与图层
-
-- `GET /v1/datasets`
-- `GET /v1/timestamps?month=2024-07`
-- `GET /v1/layers?timestamp=...`
-- `GET /v1/overlay/{layer}.png?timestamp=...&bbox=...&size=...`
-- `GET /v1/tiles/{layer}/{z}/{x}/{y}.png?timestamp=...`
-
-支持 layer（当前）：
-
-- `bathy`
-- `ais_heatmap`
-- `unet_pred`
-- `ice`
-- `wave`
-- `wind`
-
-### 5.2 推理与规划
-
-- `POST /v1/infer`
-- `POST /v1/route/plan`
-
-规划策略字段：
-
-- `blocked_sources` 支持 `bathy / unet_blocked / unet_caution`
-- `caution_mode` 支持 `tie_breaker / budget / minimize / strict`
-
-### 5.3 Gallery
-
-- `GET /v1/gallery/list`
-- `GET /v1/gallery/{id}`
-- `GET /v1/gallery/{id}/image.png`
-- `POST /v1/gallery/{id}/image`（前端截图上传）
-- `DELETE /v1/gallery/{id}`
-
-### 5.4 AIS 回测评估
-
-- `POST /v1/eval/ais/backtest`
-
-可传：
-
-- `gallery_id`（推荐）
-- 或 `timestamp + route_geojson`
-
-返回指标（第一版）：
-
-- `top10pct_hit_rate`
-- `top25pct_hit_rate`
-- `median_or_higher_hit_rate`
-- `alignment_norm_0_1`
-- `alignment_zscore`
-- 以及路线与全局热力图统计
-
----
-
-## 6. 前端功能（当前）
-
-### 6.1 ScenarioSelector
-
-- 选择月份与时间片
-- 进入地图工作台
-
-### 6.2 MapWorkspace
-
-- Leaflet 真地图
-- 图层开关 + 透明度
-- 地图点选起终点
-- 运行 U-Net 推理
-- 路径规划并展示 explain
-- 规划成功后自动截图并上传到 Gallery
-
-### 6.3 ExportReport（Gallery）
-
-- 浏览历史规划记录
-- 查看元数据与预览图
-- 下载 GeoJSON/JSON/PNG
-- 删除记录
-- 一键运行 AIS 回测并展示指标
-
----
-
-## 7. 运行方式
-
-### 7.1 后端
-
+### 后端
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### 7.2 前端
-
+### 前端
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-可选环境变量：
-
-- `VITE_API_BASE_URL`（默认 `http://127.0.0.1:8000/v1`）
-- `NSR_GRID_LAT_MIN / NSR_GRID_LAT_MAX / NSR_GRID_LON_MIN / NSR_GRID_LON_MAX`
+默认前端 API 建议：
+- `frontend/.env.local`：
+  - `VITE_API_BASE_URL=http://127.0.0.1:8000/v1`
 
 ---
 
-## 8. 测试与质量
+## 7. 群晖 NAS（DSM）部署建议
 
-后端测试：
+推荐目录：
 
-```bash
-cd backend
-python -m pytest -q
+- `/volume1/NSRplanner/app`（仓库代码，含 Dockerfile）
+- `/volume1/NSRplanner/data`（真实数据）
+- `/volume1/NSRplanner/outputs`（运行输出）
+
+`docker-compose.yml` 建议：
+
+```yaml
+services:
+  nsr2:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: nsr2
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      NSR_DATA_ROOT: "/app/data"
+      NSR_OUTPUTS_ROOT: "/app/outputs"
+      NSR_ALLOW_DEMO_FALLBACK: "0"
+      NSR_DISABLE_TORCH: "1"
+    volumes:
+      - /volume1/NSRplanner/data:/app/data:ro
+      - /volume1/NSRplanner/outputs:/app/outputs
 ```
 
-前端构建检查：
+启动后先检查：
 
-```bash
-cd frontend
-npm run build
-```
-
-当前状态：后端测试通过，前端可构建。
+- `http://NAS_IP:8000/healthz`
+- `http://NAS_IP:8000/v1/datasets`（`sample_count` 必须 > 0）
 
 ---
 
-## 9. 开发约定（执行中）
+## 8. 提交与质量门禁（执行规则）
 
-- 每次推送前执行审查与测试（至少 `pytest`，前端改动时执行 `npm run build`）
-- 所有关键操作写入 `agent.md`（带时间戳）
-- 阶段性完成即提交并推送
-- `readme.md` 可持续更新与修正，以反映真实实现状态
+- 每次提交 GitHub 前必须执行审查与测试：
+  - `python -m pytest -q`（backend）
+  - 前端有改动时执行 `npm run build`（frontend）
+- 所有关键操作写入 `agent.md`（含时间戳）
+- 阶段功能完成后及时提交并推送
 
 ---
 
-## 10. 下一步建议
+## 9. 下一步建议
 
-- 引入真实地理仿射参数，替换规则网格映射
-- 增强路径平滑与可航行约束细节
-- 增加 AIS 回测批量报告与图表导出
-- 优化前端打包体积（按路由/页面拆包）
+- 补全 `unet_pred/unet_uncertainty` 的历史缓存覆盖率（降低告警）
+- 继续优化 latest 拉取链路与错误恢复（Copernicus 不稳定场景）
+- 针对 NAS 部署补一份运行巡检脚本（启动后自动检查图层可用性与 sample_count）

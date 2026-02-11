@@ -56,6 +56,7 @@ class Settings(BaseSettings):
         "http://localhost:5179,http://127.0.0.1:5179"
     )
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    allow_demo_fallback: bool = True
     grid_lat_min: float = 60.0
     grid_lat_max: float = 86.0
     grid_lon_min: float = -180.0
@@ -125,9 +126,9 @@ def get_settings() -> Settings:
     if "unet_default_summary" not in provided:
         settings.unet_default_summary = settings.outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
 
-    # Free-tier deployment safeguard:
-    # If configured roots have no usable samples, auto-fallback to bundled demo_data.
-    if not _has_annotation_samples(settings.annotation_pack_root):
+    # Optional deployment safeguard:
+    # when enabled, auto-fallback to bundled demo_data if configured roots are empty.
+    if settings.allow_demo_fallback and not _has_annotation_samples(settings.annotation_pack_root):
         demo_root = _resolve_demo_data_root(settings.project_root)
         if demo_root is not None:
             settings.data_root = demo_root
@@ -137,7 +138,7 @@ def get_settings() -> Settings:
             settings.dataset_index_path = demo_root / "processed" / "dataset" / "index.json"
             settings.ais_heatmap_root = demo_root / "ais_heatmap"
 
-    if not _has_any_heatmap_files(settings.ais_heatmap_root):
+    if settings.allow_demo_fallback and not _has_any_heatmap_files(settings.ais_heatmap_root):
         demo_root = _resolve_demo_data_root(settings.project_root)
         if demo_root is not None:
             settings.ais_heatmap_root = demo_root / "ais_heatmap"
