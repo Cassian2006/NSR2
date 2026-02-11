@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.core.dataset import get_dataset_service, normalize_timestamp, ui_timestamp
+from app.core.data_quality import build_data_quality_report
 from app.core.render import GridBounds, parse_bbox, parse_size, render_overlay_png, render_tile_png, tile_bbox
 from app.core.config import get_settings
 
@@ -14,6 +15,12 @@ router = APIRouter(tags=["layers"])
 def get_datasets() -> dict:
     service = get_dataset_service()
     return {"dataset": service.datasets_summary()}
+
+
+@router.get("/datasets/quality")
+def get_datasets_quality(sample_limit: int = Query(default=80, ge=8, le=500)) -> dict:
+    settings = get_settings()
+    return build_data_quality_report(settings=settings, sample_limit=sample_limit)
 
 
 @router.get("/timestamps")

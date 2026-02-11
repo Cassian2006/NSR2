@@ -321,6 +321,12 @@ def _load_layer_grid(settings: Settings, timestamp: str, layer: str) -> np.ndarr
             return np.load(pred_path).astype(np.float32)
         return None
 
+    if layer == "unet_uncertainty":
+        unc_path = settings.pred_root / "unet_v1" / f"{timestamp}_uncertainty.npy"
+        if unc_path.exists():
+            return np.load(unc_path).astype(np.float32)
+        return None
+
     if x_stack is None:
         return None
 
@@ -381,6 +387,28 @@ def render_overlay_png(
             np.rint(sampled).astype(np.int16),
             inside,
             bathy_blocked_sampled=bathy_sampled,
+        )
+    elif layer == "unet_uncertainty":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid(
+                bathy_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
+        sampled_unc = np.clip(np.nan_to_num(sampled, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+        image = _render_continuous(
+            sampled_unc,
+            inside,
+            stops=[(0.0, (16, 185, 129)), (0.5, (245, 158, 11)), (1.0, (220, 38, 38))],
+            alpha_min=20,
+            alpha_max=190,
+            value_mask=sea_mask,
         )
     elif layer == "ais_heatmap":
         sea_mask = None
@@ -519,6 +547,27 @@ def render_tile_png(
             np.rint(sampled).astype(np.int16),
             inside,
             bathy_blocked_sampled=bathy_sampled,
+        )
+    elif layer == "unet_uncertainty":
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid_from_axes(
+                bathy_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
+        sampled_unc = np.clip(np.nan_to_num(sampled, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+        image = _render_continuous(
+            sampled_unc,
+            inside,
+            stops=[(0.0, (16, 185, 129)), (0.5, (245, 158, 11)), (1.0, (220, 38, 38))],
+            alpha_min=20,
+            alpha_max=190,
+            value_mask=sea_mask,
         )
     elif layer == "ais_heatmap":
         sea_mask = None

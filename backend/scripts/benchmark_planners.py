@@ -19,6 +19,11 @@ def _parse_latlon(raw: str) -> tuple[float, float]:
     return float(parts[0]), float(parts[1])
 
 
+def _parse_blocked_sources(raw: str) -> list[str]:
+    items = [x.strip() for x in raw.split(",") if x.strip()]
+    return items or ["bathy", "unet_blocked"]
+
+
 def _pick_timestamps(limit: int) -> list[str]:
     service = get_dataset_service()
     all_ts = service.list_timestamps(month="all")
@@ -33,6 +38,28 @@ def _pick_timestamps(limit: int) -> list[str]:
     return picks
 
 
+def _pick_dynamic_windows(all_ts: list[str], window: int, runs: int) -> list[list[str]]:
+    if window < 2:
+        return []
+    if len(all_ts) < window:
+        raise RuntimeError(f"Not enough timestamps for dynamic window={window}")
+    runs = max(1, int(runs))
+    if runs == 1:
+        return [all_ts[:window]]
+    max_start = len(all_ts) - window
+    if max_start <= 0:
+        return [all_ts[:window]]
+    stride = max(1, max_start // max(1, runs - 1))
+    starts = [min(max_start, i * stride) for i in range(runs)]
+    unique_starts = []
+    seen = set()
+    for s in starts:
+        if s not in seen:
+            seen.add(s)
+            unique_starts.append(s)
+    return [all_ts[s : s + window] for s in unique_starts]
+
+
 def run_benchmark(
     *,
     start: tuple[float, float],
@@ -40,6 +67,7 @@ def run_benchmark(
     timestamps: list[str],
     planners: list[str],
     corridor_bias: float,
+    blocked_sources: list[str],
 ) -> list[dict]:
     settings = get_settings()
     rows: list[dict] = []
@@ -59,7 +87,7 @@ def run_benchmark(
                     corridor_bias=corridor_bias,
                     caution_mode="tie_breaker",
                     smoothing=True,
-                    blocked_sources=["bathy", "unet_blocked"],
+                    blocked_sources=blocked_sources,
                     planner=planner,
                 )
                 explain = res.explain
@@ -92,59 +120,66 @@ def run_dynamic_benchmark(
     *,
     start: tuple[float, float],
     goal: tuple[float, float],
-    timestamps: list[str],
+    windows: list[list[str]],
     planners: list[str],
     corridor_bias: float,
     advance_steps: int,
+    blocked_sources: list[str],
 ) -> list[dict]:
     settings = get_settings()
     rows: list[dict] = []
-    for planner in planners:
-        t0 = time.perf_counter()
-        status = "ok"
-        detail = ""
-        explain = {}
-        try:
-            res = plan_grid_route_dynamic(
-                settings=settings,
-                timestamps=timestamps,
-                start=start,
-                goal=goal,
-                model_version="unet_v1",
-                corridor_bias=corridor_bias,
-                caution_mode="tie_breaker",
-                smoothing=True,
-                blocked_sources=["bathy", "unet_blocked"],
-                planner=planner,
-                advance_steps=advance_steps,
-            )
-            explain = res.explain
-        except PlanningError as exc:
-            status = "fail"
-            detail = str(exc)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        replans = explain.get("dynamic_replans", []) if isinstance(explain, dict) else []
-        rows.append(
-            {
-                "mode": "dynamic",
-                "planner": planner,
-                "status": status,
-                "timestamps": len(timestamps),
-                "advance_steps": int(advance_steps),
-                "runtime_ms": round(elapsed_ms, 3),
-                "distance_km": float(explain.get("distance_km", 0.0)),
-                "caution_len_km": float(explain.get("caution_len_km", 0.0)),
-                "corridor_alignment": float(explain.get("corridor_alignment", 0.0)),
-                "replan_count": len(replans) if isinstance(replans, list) else 0,
-                "avg_replan_ms": round(
-                    float(sum(float(x.get("runtime_ms", 0.0)) for x in replans) / max(1, len(replans))),
-                    3,
+    for win_idx, timestamps in enumerate(windows):
+        for planner in planners:
+            t0 = time.perf_counter()
+            status = "ok"
+            detail = ""
+            explain = {}
+            try:
+                res = plan_grid_route_dynamic(
+                    settings=settings,
+                    timestamps=timestamps,
+                    start=start,
+                    goal=goal,
+                    model_version="unet_v1",
+                    corridor_bias=corridor_bias,
+                    caution_mode="tie_breaker",
+                    smoothing=True,
+                    blocked_sources=blocked_sources,
+                    planner=planner,
+                    advance_steps=advance_steps,
                 )
-                if isinstance(replans, list) and replans
-                else 0.0,
-                "detail": detail,
-            }
-        )
+                explain = res.explain
+            except PlanningError as exc:
+                status = "fail"
+                detail = str(exc)
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            replans = explain.get("dynamic_replans", []) if isinstance(explain, dict) else []
+            rows.append(
+                {
+                    "mode": "dynamic",
+                    "window_idx": int(win_idx),
+                    "window_start": timestamps[0],
+                    "window_end": timestamps[-1],
+                    "planner": planner,
+                    "status": status,
+                    "timestamps": len(timestamps),
+                    "advance_steps": int(advance_steps),
+                    "runtime_ms": round(elapsed_ms, 3),
+                    "distance_km": float(explain.get("distance_km", 0.0)),
+                    "caution_len_km": float(explain.get("caution_len_km", 0.0)),
+                    "corridor_alignment": float(explain.get("corridor_alignment", 0.0)),
+                    "replan_count": len(replans) if isinstance(replans, list) else 0,
+                    "avg_replan_ms": round(
+                        float(sum(float(x.get("runtime_ms", 0.0)) for x in replans) / max(1, len(replans))),
+                        3,
+                    )
+                    if isinstance(replans, list) and replans
+                    else 0.0,
+                    "incremental_steps": int(explain.get("dynamic_incremental_steps", 0)),
+                    "rebuild_steps": int(explain.get("dynamic_rebuild_steps", 0)),
+                    "detail": detail,
+                }
+            )
     return rows
 
 
@@ -177,6 +212,19 @@ def summarize(rows: list[dict]) -> dict:
                 "fail": len(fail),
                 "success_rate": 0.0,
             }
+
+    dynamic_astar = summary.get("dynamic:astar", {})
+    dynamic_dstar = summary.get("dynamic:dstar_lite", {})
+    if dynamic_astar.get("avg_runtime_ms") and dynamic_dstar.get("avg_runtime_ms"):
+        astar_rt = float(dynamic_astar["avg_runtime_ms"])
+        dstar_rt = float(dynamic_dstar["avg_runtime_ms"])
+        speedup = (astar_rt / dstar_rt) if dstar_rt > 0 else 0.0
+        summary["dynamic:speedup"] = {
+            "astar_avg_runtime_ms": round(astar_rt, 3),
+            "dstar_avg_runtime_ms": round(dstar_rt, 3),
+            "dstar_speedup_vs_astar_x": round(speedup, 3),
+            "dstar_runtime_reduction_pct": round((1.0 - dstar_rt / astar_rt) * 100.0, 2) if astar_rt > 0 else 0.0,
+        }
     return summary
 
 
@@ -186,13 +234,21 @@ def main() -> None:
     parser.add_argument("--goal", type=str, default="72.0,150.0", help="goal lat,lon")
     parser.add_argument("--timestamps", type=int, default=12, help="sample count across full timeline")
     parser.add_argument("--corridor-bias", type=float, default=0.2)
+    parser.add_argument(
+        "--blocked-sources",
+        type=str,
+        default="bathy,unet_blocked",
+        help="comma-separated blocked sources, e.g. bathy or bathy,unet_blocked",
+    )
     parser.add_argument("--dynamic-window", type=int, default=0, help=">1 to run dynamic incremental benchmark")
+    parser.add_argument("--dynamic-runs", type=int, default=4, help="number of dynamic windows to benchmark")
     parser.add_argument("--advance-steps", type=int, default=12)
     parser.add_argument("--out-dir", type=Path, default=Path("outputs") / "benchmarks")
     args = parser.parse_args()
 
     start = _parse_latlon(args.start)
     goal = _parse_latlon(args.goal)
+    blocked_sources = _parse_blocked_sources(args.blocked_sources)
     timestamps = _pick_timestamps(args.timestamps)
     planners = ["astar", "dstar_lite"]
     rows = run_benchmark(
@@ -201,20 +257,20 @@ def main() -> None:
         timestamps=timestamps,
         planners=planners,
         corridor_bias=float(args.corridor_bias),
+        blocked_sources=blocked_sources,
     )
     if int(args.dynamic_window) > 1:
         all_ts = get_dataset_service().list_timestamps(month="all")
-        if len(all_ts) < int(args.dynamic_window):
-            raise RuntimeError(f"Not enough timestamps for dynamic window={args.dynamic_window}")
-        dynamic_ts = all_ts[: int(args.dynamic_window)]
+        windows = _pick_dynamic_windows(all_ts, int(args.dynamic_window), int(args.dynamic_runs))
         rows.extend(
             run_dynamic_benchmark(
                 start=start,
                 goal=goal,
-                timestamps=dynamic_ts,
+                windows=windows,
                 planners=planners,
                 corridor_bias=float(args.corridor_bias),
                 advance_steps=int(args.advance_steps),
+                blocked_sources=blocked_sources,
             )
         )
     summary = summarize(rows)
@@ -236,6 +292,7 @@ def main() -> None:
         "start": {"lat": start[0], "lon": start[1]},
         "goal": {"lat": goal[0], "lon": goal[1]},
         "timestamps": timestamps,
+        "blocked_sources": blocked_sources,
         "summary": summary,
         "rows": rows,
     }

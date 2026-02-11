@@ -14,6 +14,8 @@ from app.model.infer import run_unet_inference
 
 
 EARTH_RADIUS_KM = 6371.0088
+DSTAR_INCREMENTAL_CHANGED_RATIO = 0.08
+DSTAR_INCREMENTAL_CHANGED_MIN_CELLS = 64
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -271,6 +273,29 @@ def _transition_cost(
     return step_km * mult
 
 
+def _adjacent_blocked_ratio(cells: list[tuple[int, int]], blocked: np.ndarray) -> float:
+    if not cells:
+        return 0.0
+    h, w = blocked.shape
+    near = 0
+    for r, c in cells:
+        is_near = False
+        for rr, cc in _neighbors(r, c, h, w):
+            if blocked[rr, cc]:
+                is_near = True
+                break
+        if is_near:
+            near += 1
+    return float(near / max(1, len(cells)))
+
+
+def _caution_cell_ratio(cells: list[tuple[int, int]], caution: np.ndarray) -> float:
+    if not cells:
+        return 0.0
+    hits = sum(1 for r, c in cells if caution[r, c])
+    return float(hits / max(1, len(cells)))
+
+
 def _run_astar(
     *,
     geo,
@@ -489,6 +514,7 @@ class _DStarLiteIncremental:
 
         self.open_heap: list[tuple[float, float, int, int]] = []
         self.open_best: dict[tuple[int, int], tuple[float, float]] = {}
+        self._needs_replan = False
 
     @staticmethod
     def _lex_lt(a: tuple[float, float], b: tuple[float, float]) -> bool:
@@ -606,10 +632,18 @@ class _DStarLiteIncremental:
                 for pr, pc in _neighbors(ur, uc, self.h, self.w):
                     self._update_vertex((pr, pc))
 
-    def update_blocked(self, new_blocked: np.ndarray, changed_cells: np.ndarray) -> None:
+    def update_blocked(
+        self,
+        new_blocked: np.ndarray,
+        changed_cells: np.ndarray,
+        *,
+        auto_compute: bool = True,
+    ) -> None:
         if new_blocked.shape != (self.h, self.w):
             raise PlanningError("Dynamic update shape mismatch in D* Lite planner.")
-        self.blocked = new_blocked.copy()
+        if changed_cells.size == 0:
+            return
+        np.copyto(self.blocked, new_blocked)
         touched: set[tuple[int, int]] = set()
         for rc in changed_cells:
             r = int(rc[0])
@@ -619,17 +653,29 @@ class _DStarLiteIncremental:
                 touched.add((pr, pc))
         for u in touched:
             self._update_vertex(u)
-        self.compute_shortest_path()
+        self._needs_replan = True
+        if auto_compute:
+            self.compute_shortest_path()
+            self._needs_replan = False
 
-    def move_start(self, new_start: tuple[int, int]) -> None:
+    def move_start(self, new_start: tuple[int, int], *, auto_compute: bool = True) -> None:
         if new_start == self.start:
             return
         self.km += self._heuristic(self.last, new_start)
         self.last = new_start
         self.start = new_start
-        self.compute_shortest_path()
+        self._needs_replan = True
+        if auto_compute:
+            self.compute_shortest_path()
+            self._needs_replan = False
+
+    def sync_if_needed(self) -> None:
+        if self._needs_replan:
+            self.compute_shortest_path()
+            self._needs_replan = False
 
     def extract_path(self, max_steps: int | None = None) -> list[tuple[int, int]]:
+        self.sync_if_needed()
         max_steps = max_steps or self.h * self.w
         if self.blocked[self.start[0], self.start[1]]:
             raise PlanningError("Current start is blocked in D* Lite extraction.")
@@ -723,11 +769,23 @@ def plan_grid_route_dynamic(
     goal_rc = _nearest_unblocked((gr0, gc0), states[0].blocked, states[0].free_cells)
     start_adjusted = start_rc != (sr0, sc0)
     goal_adjusted = goal_rc != (gr0, gc0)
+    s_lat0, s_lon0 = states[0].geo.rc_to_latlon(sr0, sc0)
+    s_lat1, s_lon1 = states[0].geo.rc_to_latlon(*start_rc)
+    g_lat0, g_lon0 = states[0].geo.rc_to_latlon(gr0, gc0)
+    g_lat1, g_lon1 = states[0].geo.rc_to_latlon(*goal_rc)
+    start_adjust_km = haversine_km(s_lat0, s_lon0, s_lat1, s_lon1)
+    goal_adjust_km = haversine_km(g_lat0, g_lon0, g_lat1, g_lon1)
 
     executed_coords: list[list[float]] = []
+    executed_points = 0
+    executed_caution_points = 0
+    executed_adjacent_blocked_points = 0
     corridor_vals: list[float] = []
     total_distance_km = 0.0
+    base_distance_km = 0.0
     caution_len_km = 0.0
+    cost_caution_extra_km = 0.0
+    cost_corridor_discount_km = 0.0
     replans: list[dict] = []
     route_cells_executed = 0
     dynamic_notes: list[str] = []
@@ -777,11 +835,13 @@ def plan_grid_route_dynamic(
                 )
                 step_update_mode = "rebuild"
             else:
-                changed = np.argwhere(dstar.blocked != state.blocked)
-                step_changed = int(changed.shape[0]) if changed.ndim == 2 else 0
+                diff_mask = dstar.blocked != state.blocked
+                step_changed = int(np.count_nonzero(diff_mask))
                 change_ratio = float(step_changed) / float(h * w)
-                if step_changed and change_ratio <= 0.02:
-                    dstar.update_blocked(state.blocked, changed)
+                incremental_limit = max(DSTAR_INCREMENTAL_CHANGED_MIN_CELLS, int(h * w * DSTAR_INCREMENTAL_CHANGED_RATIO))
+                if step_changed and step_changed <= incremental_limit:
+                    changed = np.argwhere(diff_mask)
+                    dstar.update_blocked(state.blocked, changed, auto_compute=False)
                     step_update_mode = "incremental"
                 elif step_changed:
                     dstar = _DStarLiteIncremental(
@@ -815,7 +875,8 @@ def plan_grid_route_dynamic(
                     )
                     step_update_mode = "rebuild"
                 if dstar.start != current_start:
-                    dstar.move_start(current_start)
+                    dstar.move_start(current_start, auto_compute=False)
+                dstar.sync_if_needed()
             current_cells = dstar.extract_path()
 
         raw_points = len(current_cells)
@@ -828,6 +889,8 @@ def plan_grid_route_dynamic(
         move_edges = min(advance_steps, len(move_cells) - 1) if step_idx < len(states) - 1 else len(move_cells) - 1
         step_distance_km = 0.0
         step_caution_km = 0.0
+        step_caution_extra_km = 0.0
+        step_corridor_discount_km = 0.0
         for idx in range(1, move_edges + 1):
             pr, pc = move_cells[idx - 1]
             cr, cc = move_cells[idx]
@@ -837,13 +900,27 @@ def plan_grid_route_dynamic(
             step_distance_km += step
             if state.caution[cr, cc]:
                 step_caution_km += step
+                step_caution_extra_km += step * caution_penalty
+                executed_caution_points += 1
+            executed_points += 1
+            near_blocked = False
+            for nr, nc in _neighbors(cr, cc, h, w):
+                if state.blocked[nr, nc]:
+                    near_blocked = True
+                    break
+            if near_blocked:
+                executed_adjacent_blocked_points += 1
+            step_corridor_discount_km += step * corridor_reward * float(state.ais_norm[cr, cc])
             corridor_vals.append(float(state.ais_norm[cr, cc]))
             if not executed_coords:
                 executed_coords.append([plon, plat])
             executed_coords.append([clon, clat])
 
         total_distance_km += step_distance_km
+        base_distance_km += step_distance_km
         caution_len_km += step_caution_km
+        cost_caution_extra_km += step_caution_extra_km
+        cost_corridor_discount_km += step_corridor_discount_km
         route_cells_executed += move_edges
 
         moved_to = move_cells[move_edges]
@@ -868,24 +945,45 @@ def plan_grid_route_dynamic(
         if current_start == current_goal:
             break
 
+    incremental_steps = int(sum(1 for r in replans if r.get("update_mode") == "incremental"))
+    rebuild_steps = int(sum(1 for r in replans if r.get("update_mode") == "rebuild"))
     explain = {
         "distance_km": round(float(total_distance_km), 3),
         "distance_nm": round(float(total_distance_km) * 0.539957, 3),
         "caution_len_km": round(float(caution_len_km), 3),
         "corridor_alignment": round(float(np.mean(corridor_vals) if corridor_vals else 0.0), 3),
+        "corridor_alignment_p50": round(float(np.percentile(corridor_vals, 50)) if corridor_vals else 0.0, 3),
+        "corridor_alignment_p90": round(float(np.percentile(corridor_vals, 90)) if corridor_vals else 0.0, 3),
         "caution_mode": caution_mode,
         "effective_caution_penalty": round(float(caution_penalty), 4),
         "effective_corridor_reward": round(float(corridor_reward), 4),
+        "route_cost_base_km": round(float(base_distance_km), 3),
+        "route_cost_caution_extra_km": round(float(cost_caution_extra_km), 3),
+        "route_cost_corridor_discount_km": round(float(cost_corridor_discount_km), 3),
+        "route_cost_effective_km": round(float(base_distance_km + cost_caution_extra_km - cost_corridor_discount_km), 3),
         "smoothing": bool(smoothing),
         "start_adjusted": start_adjusted,
         "goal_adjusted": goal_adjusted,
+        "start_adjust_km": round(float(start_adjust_km), 3),
+        "goal_adjust_km": round(float(goal_adjust_km), 3),
         "planner": "dstar_lite_incremental" if planner_key in {"dstar_lite", "dstar-lite", "dstar"} else "astar_recompute",
         "dynamic_replans": replans,
         "dynamic_advance_steps": int(advance_steps),
         "dynamic_timestamps": timestamps,
         "dynamic_notes": dynamic_notes,
+        "dynamic_incremental_steps": incremental_steps,
+        "dynamic_rebuild_steps": rebuild_steps,
+        "dynamic_incremental_threshold_ratio": round(float(DSTAR_INCREMENTAL_CHANGED_RATIO), 4),
         "executed_edges": int(route_cells_executed),
         "blocked_ratio_last": round(float(states[-1].blocked.mean()), 4),
+        "adjacent_blocked_ratio": round(float(executed_adjacent_blocked_points / max(1, executed_points)), 4),
+        "caution_cell_ratio": round(float(executed_caution_points / max(1, executed_points)), 4),
+        "replan_runtime_ms_total": round(float(sum(float(r.get("runtime_ms", 0.0)) for r in replans)), 3),
+        "replan_runtime_ms_mean": round(
+            float(sum(float(r.get("runtime_ms", 0.0)) for r in replans) / max(1, len(replans))),
+            3,
+        ),
+        "replan_changed_cells_total": int(sum(int(r.get("changed_blocked_cells", 0)) for r in replans)),
     }
 
     route_geojson = {
@@ -1025,6 +1123,9 @@ def plan_grid_route(
     coords: list[list[float]] = []
     raw_distance_km = 0.0
     caution_len_km = 0.0
+    base_distance_km = 0.0
+    cost_caution_extra_km = 0.0
+    cost_corridor_discount_km = 0.0
     corridor_vals: list[float] = []
     prev_lat = None
     prev_lon = None
@@ -1035,24 +1136,44 @@ def plan_grid_route(
         if idx > 0 and prev_lat is not None and prev_lon is not None:
             step = haversine_km(prev_lat, prev_lon, lat, lon)
             raw_distance_km += step
+            base_distance_km += step
             if caution[r, c]:
                 caution_len_km += step
+                cost_caution_extra_km += step * caution_penalty
+            cost_corridor_discount_km += step * corridor_reward * float(ais_norm[r, c])
         prev_lat, prev_lon = lat, lon
+
+    s_lat0, s_lon0 = geo.rc_to_latlon(*s_rc)
+    s_lat1, s_lon1 = geo.rc_to_latlon(*s_rc_adj)
+    g_lat0, g_lon0 = geo.rc_to_latlon(*g_rc)
+    g_lat1, g_lon1 = geo.rc_to_latlon(*g_rc_adj)
+    start_adjust_km = haversine_km(s_lat0, s_lon0, s_lat1, s_lon1)
+    goal_adjust_km = haversine_km(g_lat0, g_lon0, g_lat1, g_lon1)
 
     explain = {
         "distance_km": round(float(raw_distance_km), 3),
         "distance_nm": round(float(raw_distance_km) * 0.539957, 3),
         "caution_len_km": round(float(caution_len_km), 3),
         "corridor_alignment": round(float(np.mean(corridor_vals) if corridor_vals else 0.0), 3),
+        "corridor_alignment_p50": round(float(np.percentile(corridor_vals, 50)) if corridor_vals else 0.0, 3),
+        "corridor_alignment_p90": round(float(np.percentile(corridor_vals, 90)) if corridor_vals else 0.0, 3),
         "caution_mode": caution_mode,
         "effective_caution_penalty": round(float(caution_penalty), 4),
         "effective_corridor_reward": round(float(corridor_reward), 4),
+        "route_cost_base_km": round(float(base_distance_km), 3),
+        "route_cost_caution_extra_km": round(float(cost_caution_extra_km), 3),
+        "route_cost_corridor_discount_km": round(float(cost_corridor_discount_km), 3),
+        "route_cost_effective_km": round(float(base_distance_km + cost_caution_extra_km - cost_corridor_discount_km), 3),
         "smoothing": bool(smoothing),
         "raw_points": len(raw_cells),
         "smoothed_points": len(cells),
         "start_adjusted": s_rc_adj != s_rc,
         "goal_adjusted": g_rc_adj != g_rc,
+        "start_adjust_km": round(float(start_adjust_km), 3),
+        "goal_adjust_km": round(float(goal_adjust_km), 3),
         "blocked_ratio": round(float(blocked.mean()), 4),
+        "adjacent_blocked_ratio": round(float(_adjacent_blocked_ratio(cells, blocked)), 4),
+        "caution_cell_ratio": round(float(_caution_cell_ratio(cells, caution)), 4),
         "planner": planner_key,
         "grid_bounds": {
             "lat_min": bounds.lat_min,

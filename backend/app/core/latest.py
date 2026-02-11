@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from threading import Lock
+from typing import Callable, TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -15,6 +17,7 @@ from app.core.config import Settings
 from app.core.copernicus_live import CopernicusLiveError, is_copernicus_configured, pull_latest_env_partial
 from app.core.dataset import get_dataset_service
 from app.core.geo import load_grid_geo
+from app.core.latest_source_health import can_attempt_source, record_source_failure, record_source_success
 
 
 TIMESTAMP_FMT = "%Y-%m-%d_%H"
@@ -29,6 +32,12 @@ DEFAULT_CHANNELS = [
     "bathy",
     "ais_heatmap",
 ]
+COPERNICUS_SOURCE = "copernicus_live"
+SNAPSHOT_SOURCE = "remote_snapshot"
+
+_TIMESTAMP_LOCKS_LOCK = Lock()
+_TIMESTAMP_LOCKS: dict[str, Lock] = {}
+_T = TypeVar("_T")
 
 
 class LatestDataError(RuntimeError):
@@ -53,6 +62,19 @@ def _emit_progress(progress_cb: ProgressCB | None, phase: str, message: str, per
     except Exception:
         # Progress reporting should never block core planning flow.
         pass
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_timestamp_lock(timestamp: str) -> Lock:
+    with _TIMESTAMP_LOCKS_LOCK:
+        lock = _TIMESTAMP_LOCKS.get(timestamp)
+        if lock is None:
+            lock = Lock()
+            _TIMESTAMP_LOCKS[timestamp] = lock
+        return lock
 
 
 def _timestamp_from_date(date_str: str, hour: int) -> str:
@@ -95,6 +117,26 @@ def _load_channel_names(pack_dir: Path, channels_count: int) -> list[str]:
     return DEFAULT_CHANNELS[:channels_count]
 
 
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+    tmp_path.write_bytes(payload)
+    tmp_path.replace(path)
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    _atomic_write_bytes(
+        path,
+        json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
+    )
+
+
+def _atomic_write_npy(path: Path, array: np.ndarray) -> None:
+    buffer = io.BytesIO()
+    np.save(buffer, array, allow_pickle=False)
+    _atomic_write_bytes(path, buffer.getvalue())
+
+
 def _save_annotation_pack(
     *,
     settings: Settings,
@@ -108,8 +150,8 @@ def _save_annotation_pack(
 ) -> None:
     ann_dir = settings.annotation_pack_root / timestamp
     ann_dir.mkdir(parents=True, exist_ok=True)
-    np.save(ann_dir / "x_stack.npy", x_stack.astype(np.float32))
-    np.save(ann_dir / "blocked_mask.npy", blocked_mask.astype(np.uint8))
+    _atomic_write_npy(ann_dir / "x_stack.npy", x_stack.astype(np.float32))
+    _atomic_write_npy(ann_dir / "blocked_mask.npy", blocked_mask.astype(np.uint8))
 
     meta = {
         "timestamp": timestamp,
@@ -123,8 +165,9 @@ def _save_annotation_pack(
         meta["target_lat"] = [float(v) for v in target_lat.tolist()]
     if target_lon is not None:
         meta["target_lon"] = [float(v) for v in target_lon.tolist()]
-    (ann_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    (ann_dir / "latest_meta.json").write_text(json.dumps(source_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    _atomic_write_json(ann_dir / "meta.json", meta)
+    _atomic_write_json(ann_dir / "latest_meta.json", source_meta)
 
 
 def get_latest_meta(settings: Settings, timestamp: str) -> dict:
@@ -137,13 +180,49 @@ def get_latest_meta(settings: Settings, timestamp: str) -> dict:
         return {}
 
 
+def _with_retries(
+    *,
+    run: Callable[[], _T],
+    retries: int,
+    backoff_sec: float,
+    label: str,
+    progress_cb: ProgressCB | None = None,
+    phase: str = "download",
+    base_percent: int = 30,
+) -> _T:
+    attempts = max(1, int(retries))
+    wait_base = max(0.0, float(backoff_sec))
+    last_exc: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return run()
+        except Exception as exc:  # pragma: no cover - exercised via call sites
+            last_exc = exc
+            if attempt >= attempts:
+                break
+            delay = wait_base * (2 ** (attempt - 1))
+            _emit_progress(
+                progress_cb,
+                phase,
+                f"{label} attempt {attempt}/{attempts} failed, retrying in {delay:.1f}s",
+                min(95, base_percent + attempt),
+            )
+            if delay > 0:
+                time.sleep(delay)
+
+    if isinstance(last_exc, LatestDataError):
+        raise last_exc
+    raise LatestDataError(f"{label} failed after {attempts} attempts: {last_exc}")
+
+
 def _download_latest_snapshot(
     *,
     settings: Settings,
     timestamp: str,
     progress_cb: ProgressCB | None = None,
 ) -> str:
-    _emit_progress(progress_cb, "snapshot", "正在下载远程最新快照", 35)
+    _emit_progress(progress_cb, "snapshot", "Downloading latest remote snapshot", 35)
     if not settings.latest_snapshot_url_template.strip():
         raise LatestDataError("latest snapshot URL template is not configured")
 
@@ -156,14 +235,26 @@ def _download_latest_snapshot(
     headers: dict[str, str] = {}
     if settings.latest_snapshot_token.strip():
         headers["Authorization"] = f"Bearer {settings.latest_snapshot_token.strip()}"
-    req = Request(url=url, headers=headers, method="GET")
-    try:
-        with urlopen(req, timeout=60) as resp:
-            body = resp.read()
-    except HTTPError as exc:
-        raise LatestDataError(f"latest snapshot fetch failed: HTTP {exc.code}") from exc
-    except URLError as exc:
-        raise LatestDataError(f"latest snapshot fetch failed: {exc.reason}") from exc
+
+    def _download_body() -> bytes:
+        req = Request(url=url, headers=headers, method="GET")
+        try:
+            with urlopen(req, timeout=max(10, int(settings.copernicus_request_timeout_sec))) as resp:
+                return resp.read()
+        except HTTPError as exc:
+            raise LatestDataError(f"latest snapshot fetch failed: HTTP {exc.code}") from exc
+        except URLError as exc:
+            raise LatestDataError(f"latest snapshot fetch failed: {exc.reason}") from exc
+
+    body = _with_retries(
+        run=_download_body,
+        retries=settings.latest_remote_retries,
+        backoff_sec=settings.latest_remote_retry_backoff_sec,
+        label="snapshot download",
+        progress_cb=progress_cb,
+        phase="snapshot",
+        base_percent=38,
+    )
 
     try:
         with np.load(io.BytesIO(body), allow_pickle=False) as npz:
@@ -199,10 +290,10 @@ def _download_latest_snapshot(
         source_meta={
             "source": "remote_snapshot",
             "snapshot_url": url,
-            "materialized_at": datetime.utcnow().isoformat() + "Z",
+            "materialized_at": _utc_now_iso(),
         },
     )
-    _emit_progress(progress_cb, "snapshot", "远程快照已落盘", 90)
+    _emit_progress(progress_cb, "snapshot", "Remote snapshot persisted", 90)
     return url
 
 
@@ -216,7 +307,7 @@ def _materialize_from_copernicus(
         raise LatestDataError("Copernicus account or dataset settings are incomplete")
 
     base_timestamp = _nearest_local_timestamp(timestamp)
-    _emit_progress(progress_cb, "prepare", f"使用模板网格 {base_timestamp}", 10)
+    _emit_progress(progress_cb, "prepare", f"Using template grid {base_timestamp}", 10)
     base_dir = settings.annotation_pack_root / base_timestamp
     x_base_path = base_dir / "x_stack.npy"
     blocked_path = base_dir / "blocked_mask.npy"
@@ -231,17 +322,30 @@ def _materialize_from_copernicus(
     channel_names = _load_channel_names(base_dir, channels_count=int(base_stack.shape[0]))
     geo = load_grid_geo(settings=settings, timestamp=base_timestamp, shape=blocked_mask.shape)
     target_time = datetime.strptime(timestamp, TIMESTAMP_FMT)
-    _emit_progress(progress_cb, "download", "正在拉取 Copernicus 网格", 20)
+    _emit_progress(progress_cb, "download", "Pulling Copernicus grids", 20)
 
-    try:
-        pulled = pull_latest_env_partial(
+    def _pull():
+        return pull_latest_env_partial(
             settings=settings,
             target_time=target_time,
             target_lats=geo.lat_axis.astype(np.float64),
             target_lons=geo.lon_axis.astype(np.float64),
             progress_cb=progress_cb,
         )
+
+    try:
+        pulled = _with_retries(
+            run=_pull,
+            retries=settings.latest_remote_retries,
+            backoff_sec=settings.latest_remote_retry_backoff_sec,
+            label="copernicus pull",
+            progress_cb=progress_cb,
+            phase="download",
+            base_percent=24,
+        )
     except CopernicusLiveError as exc:
+        raise LatestDataError(str(exc)) from exc
+    except LatestDataError as exc:
         raise LatestDataError(str(exc)) from exc
 
     out_stack = base_stack.copy()
@@ -249,11 +353,11 @@ def _materialize_from_copernicus(
         field = pulled.fields.get(ch)
         if field is not None and field.shape == blocked_mask.shape:
             out_stack[idx] = np.nan_to_num(field, nan=0.0, posinf=0.0, neginf=0.0)
-    _emit_progress(progress_cb, "merge", "正在合并实时通道到模型输入", 82)
+    _emit_progress(progress_cb, "merge", "Merging live channels into model input", 82)
 
     source_meta = {
         "source": "copernicus_live",
-        "materialized_at": datetime.utcnow().isoformat() + "Z",
+        "materialized_at": _utc_now_iso(),
         "requested_timestamp": timestamp,
         "template_timestamp": base_timestamp,
         "datasets": {
@@ -287,7 +391,7 @@ def _materialize_from_copernicus(
         target_lat=geo.lat_axis.astype(np.float64),
         target_lon=geo.lon_axis.astype(np.float64),
     )
-    _emit_progress(progress_cb, "materialize", "最新数据已物化", 92)
+    _emit_progress(progress_cb, "materialize", "Latest data materialized", 92)
     return source_meta
 
 
@@ -300,36 +404,65 @@ def resolve_latest_timestamp(
     progress_cb: ProgressCB | None = None,
 ) -> LatestResolveResult:
     timestamp = _timestamp_from_date(date, hour)
-    if _is_materialized(settings, timestamp) and not force_refresh:
-        _emit_progress(progress_cb, "resolve", "使用已有本地最新快照", 70)
-        return LatestResolveResult(timestamp=timestamp, source="local_existing", note="already materialized")
+    timestamp_lock = _get_timestamp_lock(timestamp)
 
-    if is_copernicus_configured(settings):
-        try:
-            source_meta = _materialize_from_copernicus(
-                settings=settings,
-                timestamp=timestamp,
-                progress_cb=progress_cb,
-            )
-            _emit_progress(progress_cb, "resolve", "Copernicus 拉取完成", 94)
-            return LatestResolveResult(
-                timestamp=timestamp,
-                source="copernicus_live",
-                note=f"materialized from Copernicus ({source_meta.get('materialized_at', '')})",
-            )
-        except LatestDataError:
-            # Fall through to snapshot/fallback path.
-            pass
+    with timestamp_lock:
+        if _is_materialized(settings, timestamp) and not force_refresh:
+            _emit_progress(progress_cb, "resolve", "Using existing local latest snapshot", 70)
+            return LatestResolveResult(timestamp=timestamp, source="local_existing", note="already materialized")
 
-    try:
-        url = _download_latest_snapshot(settings=settings, timestamp=timestamp, progress_cb=progress_cb)
-        _emit_progress(progress_cb, "resolve", "远程快照拉取完成", 94)
-        return LatestResolveResult(timestamp=timestamp, source="remote_snapshot", note=f"fetched from {url}")
-    except LatestDataError as exc:
+        copernicus_error: str | None = None
+        snapshot_error: str | None = None
+        if is_copernicus_configured(settings):
+            can_use_copernicus, reason = can_attempt_source(COPERNICUS_SOURCE)
+            if can_use_copernicus:
+                try:
+                    source_meta = _materialize_from_copernicus(
+                        settings=settings,
+                        timestamp=timestamp,
+                        progress_cb=progress_cb,
+                    )
+                    record_source_success(COPERNICUS_SOURCE)
+                    _emit_progress(progress_cb, "resolve", "Copernicus pull completed", 94)
+                    return LatestResolveResult(
+                        timestamp=timestamp,
+                        source=COPERNICUS_SOURCE,
+                        note=f"materialized from Copernicus ({source_meta.get('materialized_at', '')})",
+                    )
+                except LatestDataError as exc:
+                    # Fall through to snapshot/fallback path.
+                    copernicus_error = str(exc)
+                    record_source_failure(COPERNICUS_SOURCE, copernicus_error)
+            else:
+                copernicus_error = f"skipped_by_health_guard:{reason}"
+
+        if settings.latest_snapshot_url_template.strip():
+            can_use_snapshot, reason = can_attempt_source(SNAPSHOT_SOURCE)
+            if can_use_snapshot:
+                try:
+                    url = _download_latest_snapshot(settings=settings, timestamp=timestamp, progress_cb=progress_cb)
+                    record_source_success(SNAPSHOT_SOURCE)
+                    _emit_progress(progress_cb, "resolve", "Remote snapshot pull completed", 94)
+                    return LatestResolveResult(timestamp=timestamp, source=SNAPSHOT_SOURCE, note=f"fetched from {url}")
+                except LatestDataError as exc:
+                    snapshot_error = str(exc)
+                    record_source_failure(SNAPSHOT_SOURCE, snapshot_error)
+            else:
+                snapshot_error = f"skipped_by_health_guard:{reason}"
+        else:
+            snapshot_error = "snapshot_not_configured"
+
         fallback = _nearest_local_timestamp(timestamp)
-        _emit_progress(progress_cb, "resolve", f"回退到最近本地时间片 {fallback}", 94)
+        _emit_progress(progress_cb, "resolve", f"Fallback to nearest local timestamp: {fallback}", 94)
+
+        notes: list[str] = []
+        if copernicus_error:
+            notes.append(f"copernicus_error={copernicus_error}")
+        if snapshot_error:
+            notes.append(f"snapshot_error={snapshot_error}")
+        note = "; ".join(notes) if notes else "latest sources unavailable"
         return LatestResolveResult(
             timestamp=fallback,
             source="nearest_local_fallback",
-            note=str(exc),
+            note=note,
         )

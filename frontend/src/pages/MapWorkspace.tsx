@@ -40,6 +40,7 @@ type LayerStates = {
   bathymetry: LayerState;
   aisHeatmap: LayerState;
   unetZones: LayerState;
+  unetUncertainty: LayerState;
   ice: LayerState;
   wave: LayerState;
   wind: LayerState;
@@ -51,6 +52,7 @@ const DEFAULT_LAYERS: LayerStates = {
   bathymetry: { enabled: true, opacity: 80 },
   aisHeatmap: { enabled: true, opacity: 60 },
   unetZones: { enabled: true, opacity: 70 },
+  unetUncertainty: { enabled: false, opacity: 65 },
   ice: { enabled: false, opacity: 50 },
   wave: { enabled: false, opacity: 50 },
   wind: { enabled: false, opacity: 50 },
@@ -60,6 +62,7 @@ const AVAILABILITY_DEFAULT = {
   bathy: true,
   ais_heatmap: true,
   unet_pred: false,
+  unet_uncertainty: false,
   ice: true,
   wave: true,
   wind: true,
@@ -203,6 +206,7 @@ export default function MapWorkspace() {
       bathy: res.layers.find((l) => l.id === "bathy")?.available ?? false,
       ais_heatmap: res.layers.find((l) => l.id === "ais_heatmap")?.available ?? false,
       unet_pred: res.layers.find((l) => l.id === "unet_pred")?.available ?? false,
+      unet_uncertainty: res.layers.find((l) => l.id === "unet_uncertainty")?.available ?? false,
       ice: res.layers.find((l) => l.id === "ice")?.available ?? false,
       wave: res.layers.find((l) => l.id === "wave")?.available ?? false,
       wind: res.layers.find((l) => l.id === "wind")?.available ?? false,
@@ -466,6 +470,7 @@ export default function MapWorkspace() {
         wave: { ...prev.wave, enabled: true },
         wind: { ...prev.wind, enabled: true },
         unetZones: { ...prev.unetZones, enabled: true },
+        unetUncertainty: { ...prev.unetUncertainty, enabled: true },
       }));
       toast.success(
         `最新航线已就绪（${response.resolved?.source ?? "未知来源"} -> ${response.resolved?.used_timestamp ?? "无"}）`,
@@ -708,6 +713,13 @@ export default function MapWorkspace() {
                     onOpacityChange={(opacity) => handleOpacityChange("unetZones", opacity)}
                   />
                   <LayerToggle
+                    name={`${t("workspace.layer.uncertainty")} ${availability.unet_uncertainty ? "" : "（缺失）"}`}
+                    enabled={layers.unetUncertainty.enabled}
+                    opacity={layers.unetUncertainty.opacity}
+                    onToggle={(enabled) => handleLayerToggle("unetUncertainty", enabled)}
+                    onOpacityChange={(opacity) => handleOpacityChange("unetUncertainty", opacity)}
+                  />
+                  <LayerToggle
                     name={`${t("workspace.layer.ice")} ${availability.ice ? "" : "（缺失）"}`}
                     enabled={layers.ice.enabled}
                     opacity={layers.ice.opacity}
@@ -890,6 +902,12 @@ export default function MapWorkspace() {
                       <div>安全：{(inferResult.stats.class_ratio.safe * 100).toFixed(1)}%</div>
                       <div>谨慎：{(inferResult.stats.class_ratio.caution * 100).toFixed(1)}%</div>
                       <div>禁行：{(inferResult.stats.class_ratio.blocked * 100).toFixed(1)}%</div>
+                      {typeof inferResult.stats.uncertainty_mean === "number" ? (
+                        <div>平均不确定性：{inferResult.stats.uncertainty_mean.toFixed(3)}</div>
+                      ) : null}
+                      {typeof inferResult.stats.uncertainty_p90 === "number" ? (
+                        <div>P90 不确定性：{inferResult.stats.uncertainty_p90.toFixed(3)}</div>
+                      ) : null}
                     </div>
                   ) : null}
                 </CardContent>
@@ -926,6 +944,7 @@ export default function MapWorkspace() {
                     { color: "#ef4444", label: "禁行" },
                   ]
                 : []),
+              ...(layers.unetUncertainty.enabled ? [{ color: "rgba(220, 38, 38, 0.75)", label: "U-Net 不确定性" }] : []),
               ...(layers.aisHeatmap.enabled ? [{ color: "#3b82f6", label: "AIS 航道热力" }] : []),
             ]}
           />
@@ -985,7 +1004,41 @@ export default function MapWorkspace() {
               <div>
                 <h3 className="mb-3">{t("explain.title")}</h3>
                 <Card>
-                  <CardContent className="pt-4 space-y-2 text-sm">
+                  <CardContent className="pt-4 space-y-3 text-sm">
+                    <div className="grid grid-cols-1 gap-2 text-xs text-slate-700">
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                        规划器：{String(routeResult.explain?.planner ?? "unknown")}
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                        有效代价：{Number(routeResult.explain?.route_cost_effective_km ?? routeResult.explain?.distance_km ?? 0).toFixed(3)} km
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                        代价拆解：基础 {Number(routeResult.explain?.route_cost_base_km ?? routeResult.explain?.distance_km ?? 0).toFixed(3)} / 谨慎附加{" "}
+                        {Number(routeResult.explain?.route_cost_caution_extra_km ?? 0).toFixed(3)} / 航道折扣{" "}
+                        {Number(routeResult.explain?.route_cost_corridor_discount_km ?? 0).toFixed(3)} km
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                        风险贴边比例：{(Number(routeResult.explain?.adjacent_blocked_ratio ?? 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                        谨慎网格占比：{(Number(routeResult.explain?.caution_cell_ratio ?? 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                        走廊贴合分位：P50 {Number(routeResult.explain?.corridor_alignment_p50 ?? routeResult.explain?.corridor_alignment ?? 0).toFixed(3)} / P90{" "}
+                        {Number(routeResult.explain?.corridor_alignment_p90 ?? routeResult.explain?.corridor_alignment ?? 0).toFixed(3)}
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                        起终点修正：start {Number(routeResult.explain?.start_adjust_km ?? 0).toFixed(3)} / goal {Number(routeResult.explain?.goal_adjust_km ?? 0).toFixed(3)} km
+                      </div>
+                      {Array.isArray((routeResult.explain as any)?.dynamic_replans) ? (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                          动态重规划：{((routeResult.explain as any).dynamic_replans as unknown[]).length} 次，累计{" "}
+                          {Number(routeResult.explain?.replan_runtime_ms_total ?? 0).toFixed(1)} ms，均值{" "}
+                          {Number(routeResult.explain?.replan_runtime_ms_mean ?? 0).toFixed(1)} ms
+                        </div>
+                      ) : null}
+                    </div>
+
                     <div className="flex gap-2">
                       <div className="text-green-600 mt-0.5">通过</div>
                       <div>{t("explain.reason1")}</div>

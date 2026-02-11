@@ -18,7 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.model.losses import FocalDiceLoss
 from app.model.tiny_unet import TinyUNet
+from app.model.train_quality import build_hard_sample_weights, evaluate_sample_quality
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,6 +61,46 @@ def parse_args() -> argparse.Namespace:
         help="Output run directory. Defaults to outputs/train_runs/unet_quick_<timestamp>",
     )
     p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument(
+        "--loss",
+        choices=["ce", "focal_dice"],
+        default="focal_dice",
+        help="Training loss type.",
+    )
+    p.add_argument("--focal-gamma", type=float, default=2.0)
+    p.add_argument("--dice-smooth", type=float, default=1.0)
+    p.add_argument("--loss-lambda-ce", type=float, default=0.4)
+    p.add_argument("--loss-lambda-focal", type=float, default=0.3)
+    p.add_argument("--loss-lambda-dice", type=float, default=0.3)
+    p.add_argument(
+        "--qc-min-foreground-ratio",
+        type=float,
+        default=2e-4,
+        help="Minimum positive ratio (caution+blocked) required by sample QC.",
+    )
+    p.add_argument(
+        "--qc-max-nan-ratio",
+        type=float,
+        default=0.2,
+        help="Maximum allowed non-finite ratio in x_stack for sample QC.",
+    )
+    p.add_argument(
+        "--no-qc-drop",
+        action="store_true",
+        help="Keep QC-failed samples (still reported), instead of dropping them from training.",
+    )
+    p.add_argument(
+        "--hard-sample-quantile",
+        type=float,
+        default=0.8,
+        help="Quantile threshold for hard-sample upweighting.",
+    )
+    p.add_argument(
+        "--hard-sample-boost",
+        type=float,
+        default=2.0,
+        help="Weight boost multiplier for hard samples.",
+    )
     return p.parse_args()
 
 
@@ -90,6 +132,62 @@ def read_manifest(path: Path) -> list[SampleItem]:
                 continue
             items.append(SampleItem(timestamp=ts, x_path=x_path, y_path=y_path, split=split))
     return items
+
+
+def apply_quality_gate(
+    items: list[SampleItem],
+    *,
+    min_foreground_ratio: float,
+    max_nan_ratio: float,
+    drop_failed: bool,
+) -> tuple[list[SampleItem], dict]:
+    kept: list[SampleItem] = []
+    dropped: list[dict[str, object]] = []
+    checked = 0
+
+    for it in items:
+        try:
+            x = np.load(it.x_path, mmap_mode="r")
+            y = np.load(it.y_path, mmap_mode="r")
+            qc = evaluate_sample_quality(
+                np.asarray(x),
+                np.asarray(y),
+                min_foreground_ratio=min_foreground_ratio,
+                max_nan_ratio=max_nan_ratio,
+            )
+        except Exception as exc:
+            qc = None
+            reasons = [f"load_error:{exc}"]
+            stats = {}
+        else:
+            reasons = qc.reasons
+            stats = qc.stats
+        checked += 1
+
+        if reasons and drop_failed:
+            dropped.append(
+                {
+                    "timestamp": it.timestamp,
+                    "split": it.split,
+                    "x_path": str(it.x_path),
+                    "y_path": str(it.y_path),
+                    "reasons": reasons,
+                    "stats": stats,
+                }
+            )
+            continue
+        kept.append(it)
+
+    report = {
+        "checked": checked,
+        "kept": len(kept),
+        "dropped": len(dropped),
+        "drop_failed": bool(drop_failed),
+        "qc_min_foreground_ratio": float(min_foreground_ratio),
+        "qc_max_nan_ratio": float(max_nan_ratio),
+        "dropped_samples": dropped,
+    }
+    return kept, report
 
 
 def split_items(items: list[SampleItem], seed: int) -> tuple[list[SampleItem], list[SampleItem]]:
@@ -155,6 +253,7 @@ class RandomPatchDataset(IterableDataset):
         focus_caution_prob: float = 0.6,
         aug_noise_std: float = 0.03,
         aug_gamma_max: float = 0.15,
+        item_probs: np.ndarray | None = None,
     ) -> None:
         self.items = items
         self.mean = mean[:, None, None]
@@ -166,6 +265,13 @@ class RandomPatchDataset(IterableDataset):
         self.focus_caution_prob = float(max(0.0, min(1.0, focus_caution_prob)))
         self.aug_noise_std = float(max(0.0, aug_noise_std))
         self.aug_gamma_max = float(max(0.0, aug_gamma_max))
+        if item_probs is not None and len(item_probs) == len(items):
+            p = np.asarray(item_probs, dtype=np.float64)
+            p = np.clip(p, 0.0, None)
+            total = float(p.sum())
+            self.item_probs = (p / total) if total > 0 else None
+        else:
+            self.item_probs = None
 
     def _sample_patch_origin(
         self,
@@ -223,7 +329,11 @@ class RandomPatchDataset(IterableDataset):
         rng = np.random.default_rng(self.seed + worker_id)
         local_steps = self.steps // n_workers + int(worker_id < (self.steps % n_workers))
         for _ in range(local_steps):
-            it = self.items[int(rng.integers(0, len(self.items)))]
+            if self.item_probs is not None:
+                idx = int(rng.choice(len(self.items), p=self.item_probs))
+            else:
+                idx = int(rng.integers(0, len(self.items)))
+            it = self.items[idx]
             x = np.load(it.x_path, mmap_mode="r")
             y = np.load(it.y_path, mmap_mode="r")
             _, h, w = x.shape
@@ -311,9 +421,19 @@ def main() -> None:
     out_dir = Path(args.out_dir) if args.out_dir else (outputs_root / "train_runs" / f"unet_quick_{run_id}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    items = read_manifest(manifest)
+    raw_items = read_manifest(manifest)
+    if len(raw_items) < 4:
+        raise RuntimeError(f"Too few labeled samples in manifest: {len(raw_items)}")
+    items, qc_report = apply_quality_gate(
+        raw_items,
+        min_foreground_ratio=args.qc_min_foreground_ratio,
+        max_nan_ratio=args.qc_max_nan_ratio,
+        drop_failed=not args.no_qc_drop,
+    )
     if len(items) < 4:
-        raise RuntimeError(f"Too few labeled samples in manifest: {len(items)}")
+        raise RuntimeError(
+            f"Too few labeled samples after QC: {len(items)} (raw={len(raw_items)}, dropped={qc_report['dropped']})"
+        )
     train_items, val_items = split_items(items, seed=args.seed)
     if not val_items:
         # fallback: keep one for val
@@ -326,9 +446,28 @@ def main() -> None:
     sample_x = np.load(train_items[0].x_path, mmap_mode="r")
     in_channels = int(sample_x.shape[0])
 
+    hard_probs, hard_meta = build_hard_sample_weights(
+        [it.y_path for it in train_items],
+        hard_quantile=args.hard_sample_quantile,
+        hard_boost=args.hard_sample_boost,
+    )
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TinyUNet(in_channels=in_channels, n_classes=3, base=24).to(device)
-    criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_weights, device=device))
+    class_weights_t = torch.tensor(class_weights, device=device)
+    if args.loss == "ce":
+        criterion: nn.Module = nn.CrossEntropyLoss(weight=class_weights_t)
+    else:
+        criterion = FocalDiceLoss(
+            num_classes=3,
+            class_weights=class_weights_t,
+            focal_gamma=args.focal_gamma,
+            focal_alpha=(class_weights_t / class_weights_t.sum().clamp_min(1e-8)),
+            dice_smooth=args.dice_smooth,
+            lambda_ce=args.loss_lambda_ce,
+            lambda_focal=args.loss_lambda_focal,
+            lambda_dice=args.loss_lambda_dice,
+        )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     train_ds = RandomPatchDataset(
@@ -342,6 +481,7 @@ def main() -> None:
         focus_caution_prob=args.focus_caution_prob,
         aug_noise_std=args.aug_noise_std,
         aug_gamma_max=args.aug_gamma_max,
+        item_probs=hard_probs,
     )
     val_ds = RandomPatchDataset(
         items=val_items,
@@ -391,6 +531,8 @@ def main() -> None:
         "manifest": str(manifest),
         "out_dir": str(out_dir),
         "device": str(device),
+        "raw_manifest_rows": len(raw_items),
+        "post_qc_rows": len(items),
         "train_samples": len(train_items),
         "val_samples": len(val_items),
         "epochs": args.epochs,
@@ -399,9 +541,18 @@ def main() -> None:
         "batch_size": args.batch_size,
         "patch_size": args.patch_size,
         "lr": args.lr,
+        "loss": args.loss,
+        "focal_gamma": args.focal_gamma,
+        "dice_smooth": args.dice_smooth,
+        "loss_lambda_ce": args.loss_lambda_ce,
+        "loss_lambda_focal": args.loss_lambda_focal,
+        "loss_lambda_dice": args.loss_lambda_dice,
         "focus_caution_prob": args.focus_caution_prob,
         "aug_noise_std": args.aug_noise_std,
         "aug_gamma_max": args.aug_gamma_max,
+        "hard_sample_quantile": args.hard_sample_quantile,
+        "hard_sample_boost": args.hard_sample_boost,
+        "hard_sample_meta": hard_meta,
         "in_channels": in_channels,
         "class_weights": class_weights.tolist(),
         "norm_mean": mean.tolist(),
@@ -409,8 +560,14 @@ def main() -> None:
         "best_val_loss": best_val,
         "best_ckpt": str(best_path),
         "last_ckpt": str(last_path),
+        "quality_report": qc_report,
         "metrics": metrics,
     }
+    quality_report_path = out_dir / "quality_report.json"
+    with quality_report_path.open("w", encoding="utf-8") as f:
+        json.dump(qc_report, f, ensure_ascii=False, indent=2)
+    summary["quality_report_file"] = str(quality_report_path)
+
     with (out_dir / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print(f"saved_summary={out_dir / 'summary.json'}")

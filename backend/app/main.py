@@ -14,10 +14,24 @@ from app.api.routes_latest import router as latest_router
 from app.api.routes_plan import router as plan_router
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
+from app.core.latest_progress import configure_progress_store
+from app.core.latest_runtime import configure_latest_runtime
+from app.core.latest_source_health import configure_source_health
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_progress_store(
+        store_path=settings.latest_progress_store_path,
+        retention_hours=settings.latest_progress_retention_hours,
+        max_entries=settings.latest_progress_max_entries,
+    )
+    configure_latest_runtime(max_concurrent=settings.latest_plan_max_concurrent)
+    configure_source_health(
+        store_path=settings.latest_source_health_path,
+        failure_threshold=settings.latest_source_failure_threshold,
+        cooldown_sec=settings.latest_source_cooldown_sec,
+    )
     app = FastAPI(
         title="NSR Route Planning API",
         version="0.1.0",

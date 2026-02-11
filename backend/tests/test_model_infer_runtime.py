@@ -67,8 +67,13 @@ def test_run_unet_inference_persists_and_hits_cache(tmp_path: Path) -> None:
         output_path=out_file,
     )
     assert out_file.exists()
+    unc_file = settings.pred_root / "unet_v1" / f"{ts}_uncertainty.npy"
+    assert unc_file.exists()
     assert first["cache_hit"] is False
     assert first["shape"] == [24, 24]
+    assert first["uncertainty_file"].endswith(f"{ts}_uncertainty.npy")
+    assert isinstance(first["uncertainty_mean"], float)
+    assert isinstance(first["uncertainty_p90"], float)
 
     second = run_unet_inference(
         settings=settings,
@@ -78,3 +83,4 @@ def test_run_unet_inference_persists_and_hits_cache(tmp_path: Path) -> None:
     )
     assert second["cache_hit"] is True
     assert second["class_hist"]["safe"] + second["class_hist"]["caution"] + second["class_hist"]["blocked"] == 24 * 24
+    assert second["uncertainty_file"].endswith(f"{ts}_uncertainty.npy")

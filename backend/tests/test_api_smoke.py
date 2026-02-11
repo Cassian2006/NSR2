@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.core.dataset import normalize_timestamp
 from app.core.geo import load_grid_geo
+from app.core.latest_runtime import configure_latest_runtime, release_slot, try_acquire_slot
 from app.main import app
 
 
@@ -42,6 +43,16 @@ def test_datasets(client: TestClient) -> None:
     resp = client.get("/v1/datasets")
     assert resp.status_code == 200
     assert "dataset" in resp.json()
+
+
+def test_datasets_quality_endpoint(client: TestClient) -> None:
+    resp = client.get("/v1/datasets/quality", params={"sample_limit": 16})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "summary" in payload
+    assert "checks" in payload
+    assert "issues" in payload
+    assert payload["summary"]["status"] in {"pass", "warn", "fail"}
 
 
 def test_cors_allows_local_dev_origin(client: TestClient) -> None:
@@ -154,6 +165,9 @@ def test_route_plan_modes(client: TestClient) -> None:
     assert explain["caution_mode"] == "minimize"
     assert explain["effective_caution_penalty"] > 0
     assert explain["planner"] == "dstar_lite"
+    assert "route_cost_effective_km" in explain
+    assert "adjacent_blocked_ratio" in explain
+    assert "corridor_alignment_p90" in explain
 
 
 def test_dynamic_route_plan_replanning(client: TestClient) -> None:
@@ -185,6 +199,11 @@ def test_dynamic_route_plan_replanning(client: TestClient) -> None:
     assert isinstance(explain.get("dynamic_replans"), list)
     assert len(explain["dynamic_replans"]) >= 1
     assert explain.get("executed_edges", 0) >= 1
+    assert "route_cost_effective_km" in explain
+    assert "adjacent_blocked_ratio" in explain
+    assert "replan_runtime_ms_total" in explain
+    assert "dynamic_incremental_steps" in explain
+    assert "dynamic_rebuild_steps" in explain
 
     payload["policy"]["planner"] = "astar"
     resp_astar = client.post("/v1/route/plan/dynamic", json=payload)
@@ -213,7 +232,7 @@ def test_latest_plan_fallback(client: TestClient) -> None:
     body = resp.json()
     assert body["route_geojson"]["geometry"]["type"] == "LineString"
     assert "resolved" in body
-    assert body["resolved"]["source"] in {"local_existing", "remote_snapshot", "nearest_local_fallback"}
+    assert body["resolved"]["source"] in {"local_existing", "remote_snapshot", "nearest_local_fallback", "copernicus_live"}
 
 
 def test_latest_progress_endpoint(client: TestClient) -> None:
@@ -224,6 +243,51 @@ def test_latest_progress_endpoint(client: TestClient) -> None:
     assert payload["exists"] is False
     assert payload["status"] == "not_found"
     assert payload["progress_id"] == progress_id
+
+
+def test_latest_runtime_endpoint(client: TestClient) -> None:
+    runtime = client.get("/v1/latest/runtime")
+    assert runtime.status_code == 200
+    payload = runtime.json()
+    assert "max_concurrent" in payload
+    assert "active" in payload
+    assert "available_slots" in payload
+
+
+def test_latest_source_health_endpoint(client: TestClient) -> None:
+    resp = client.get("/v1/latest/sources/health")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "failure_threshold" in payload
+    assert "cooldown_sec" in payload
+    assert "sources" in payload
+    assert isinstance(payload["sources"], dict)
+
+
+def test_latest_plan_busy_returns_429(client: TestClient) -> None:
+    settings = get_settings()
+    configure_latest_runtime(max_concurrent=1)
+    assert try_acquire_slot() is True
+    try:
+        payload = {
+            "date": "2024-10-15",
+            "hour": 12,
+            "start": TEST_START,
+            "goal": TEST_GOAL,
+            "policy": {
+                "objective": "shortest_distance_under_safety",
+                "blocked_sources": ["bathy", "unet_blocked"],
+                "caution_mode": "tie_breaker",
+                "corridor_bias": 0.2,
+                "smoothing": True,
+                "planner": "astar",
+            },
+        }
+        resp = client.post("/v1/latest/plan", json=payload)
+        assert resp.status_code == 429
+    finally:
+        release_slot()
+        configure_latest_runtime(max_concurrent=settings.latest_plan_max_concurrent)
 
 
 def test_copernicus_config_endpoints(client: TestClient) -> None:
@@ -335,6 +399,15 @@ def test_infer_persists_file(client: TestClient) -> None:
     payload = infer_resp.json()
     output_file = Path(payload["output_file"])
     assert output_file.exists()
+    assert payload["stats"].get("uncertainty_file")
+    uncertainty_file = Path(str(payload["stats"]["uncertainty_file"]))
+    assert uncertainty_file.exists()
+
+    layers_resp = client.get("/v1/layers", params={"timestamp": ts})
+    assert layers_resp.status_code == 200
+    unc_layer = next((l for l in layers_resp.json().get("layers", []) if l.get("id") == "unet_uncertainty"), None)
+    assert unc_layer is not None
+    assert bool(unc_layer.get("available")) is True
 
 
 def test_error_payload_shape(client: TestClient) -> None:

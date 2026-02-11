@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Calendar, MapPin } from "lucide-react";
 
+import { getDatasets, getDatasetsQuality, getTimestamps } from "../api/client";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { getDatasets, getTimestamps } from "../api/client";
 import { useLanguage } from "../contexts/LanguageContext";
 
 type Snapshot = {
@@ -33,6 +33,13 @@ export default function ScenarioSelector() {
   const [selectedTimestamp, setSelectedTimestamp] = useState("");
   const [selectedSnapshot, setSelectedSnapshot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [qualitySummary, setQualitySummary] = useState<{
+    status: string;
+    timestamp_count: number;
+    issues_count?: number;
+    first_timestamp?: string;
+    last_timestamp?: string;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -50,7 +57,24 @@ export default function ScenarioSelector() {
         console.warn("datasets api unavailable, using defaults", error);
       }
     }
-    loadDatasetInfo();
+    void loadDatasetInfo();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadQuality() {
+      try {
+        const report = await getDatasetsQuality(40);
+        if (!active) return;
+        setQualitySummary(report.summary);
+      } catch (error) {
+        console.warn("dataset quality api unavailable", error);
+      }
+    }
+    void loadQuality();
     return () => {
       active = false;
     };
@@ -75,7 +99,7 @@ export default function ScenarioSelector() {
         if (active) setLoading(false);
       }
     }
-    loadTimestamps();
+    void loadTimestamps();
     return () => {
       active = false;
     };
@@ -124,7 +148,7 @@ export default function ScenarioSelector() {
                   <Label htmlFor="timestamp">{t("scenario.timestamp")}</Label>
                   <Select value={selectedTimestamp} onValueChange={setSelectedTimestamp} disabled={loading || !timestampOptions.length}>
                     <SelectTrigger id="timestamp">
-                      <SelectValue placeholder={loading ? "加载中..." : "暂无时间片"} />
+                      <SelectValue placeholder={loading ? "加载中..." : "暂无可用时间片"} />
                     </SelectTrigger>
                     <SelectContent>
                       {timestampOptions.map((ts) => (
@@ -134,6 +158,10 @@ export default function ScenarioSelector() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    共 {timestamps.length} 个时间片
+                    {timestamps.length > timestampOptions.length ? `，下拉框显示前 ${timestampOptions.length} 个` : ""}
+                  </p>
                 </div>
               </div>
 
@@ -143,6 +171,27 @@ export default function ScenarioSelector() {
                   {t("scenario.loadLayers")}
                 </Button>
               </div>
+
+              {qualitySummary ? (
+                <div
+                  className={`rounded-md border px-3 py-2 text-xs ${
+                    qualitySummary.status === "pass"
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                      : qualitySummary.status === "warn"
+                        ? "border-amber-300 bg-amber-50 text-amber-800"
+                        : "border-rose-300 bg-rose-50 text-rose-800"
+                  }`}
+                >
+                  <div className="font-medium">数据质量状态：{qualitySummary.status.toUpperCase()}</div>
+                  <div>时间片数量：{qualitySummary.timestamp_count}</div>
+                  <div>问题项：{qualitySummary.issues_count ?? 0}</div>
+                  {qualitySummary.first_timestamp && qualitySummary.last_timestamp ? (
+                    <div>
+                      范围：{qualitySummary.first_timestamp} -&gt; {qualitySummary.last_timestamp}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -152,22 +201,22 @@ export default function ScenarioSelector() {
               <CardDescription>{t("scenario.recommended.desc")}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {RECOMMENDED_SNAPSHOTS.map((snapshot) => (
                   <button
                     key={snapshot.id}
                     onClick={() => setSelectedSnapshot(snapshot.id)}
-                    className={`p-4 rounded-lg border-2 transition-all text-left hover:border-purple-400 hover:shadow-md ${
+                    className={`rounded-lg border-2 p-4 text-left transition-all hover:border-purple-400 hover:shadow-md ${
                       selectedSnapshot === snapshot.id ? "border-purple-600 bg-purple-50 shadow-md" : "border-border bg-white"
                     }`}
                   >
-                    <div className="flex items-start gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
                       <div className="mt-0.5">
                         <MapPin className={`size-4 ${selectedSnapshot === snapshot.id ? "text-purple-600" : "text-muted-foreground"}`} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className={`mb-1 ${selectedSnapshot === snapshot.id ? "text-purple-900" : ""}`}>{snapshot.label}</h4>
-                        <p className="text-xs text-muted-foreground font-mono">{snapshot.period}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{snapshot.period}</p>
                       </div>
                     </div>
                   </button>

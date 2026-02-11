@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     pred_root: Path = outputs_root / "pred"
     frontend_dist_root: Path = project_root / "frontend" / "build"
     unet_default_summary: Path = outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
+    latest_root: Path = outputs_root / "latest"
+    latest_progress_store_path: Path = latest_root / "progress_state.json"
+    latest_source_health_path: Path = latest_root / "source_health.json"
+    latest_progress_retention_hours: int = 72
+    latest_progress_max_entries: int = 2000
+    latest_plan_max_concurrent: int = 2
+    latest_remote_retries: int = 3
+    latest_remote_retry_backoff_sec: float = 1.5
+    latest_source_failure_threshold: int = 3
+    latest_source_cooldown_sec: int = 900
     latest_snapshot_url_template: str = ""
     latest_snapshot_token: str = ""
     copernicus_username: str = ""
@@ -60,6 +70,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     settings.outputs_root.mkdir(parents=True, exist_ok=True)
+    settings.latest_root.mkdir(parents=True, exist_ok=True)
     settings.gallery_root.mkdir(parents=True, exist_ok=True)
     (settings.gallery_root / "runs").mkdir(parents=True, exist_ok=True)
     (settings.gallery_root / "thumbs").mkdir(parents=True, exist_ok=True)

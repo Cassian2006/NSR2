@@ -129,6 +129,7 @@ class DatasetService:
         legacy = self._legacy_entry_by_timestamp(normalized)
         local_heatmap = self._find_local_heatmap(normalized)
         pred_file = self.settings.pred_root / "unet_v1" / f"{normalized}.npy"
+        unc_file = self.settings.pred_root / "unet_v1" / f"{normalized}_uncertainty.npy"
         legacy_bathy_exists = False
         if legacy and legacy.get("x_bathy"):
             legacy_bathy_exists = Path(str(legacy["x_bathy"])).exists()
@@ -153,6 +154,12 @@ class DatasetService:
                 "name": "U-Net Prediction",
                 "available": pred_file.exists(),
                 "unit": "class",
+            },
+            {
+                "id": "unet_uncertainty",
+                "name": "U-Net Uncertainty",
+                "available": unc_file.exists(),
+                "unit": "entropy",
             },
             {
                 "id": "ice",

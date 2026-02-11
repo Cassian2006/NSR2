@@ -10,6 +10,7 @@ import {
 } from "react-leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { useEffect, useRef } from "react";
 
 import { getApiOrigin } from "../api/client";
 import { useLanguage } from "../contexts/LanguageContext";
@@ -20,6 +21,7 @@ interface MapCanvasProps {
     bathymetry: { enabled: boolean; opacity: number };
     aisHeatmap: { enabled: boolean; opacity: number };
     unetZones: { enabled: boolean; opacity: number };
+    unetUncertainty: { enabled: boolean; opacity: number };
     ice: { enabled: boolean; opacity: number };
     wave: { enabled: boolean; opacity: number };
     wind: { enabled: boolean; opacity: number };
@@ -96,6 +98,29 @@ function MapEvents({
 export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, start, goal, onMapClick }: MapCanvasProps) {
   const { t } = useLanguage();
   const [mousePos, setMousePos] = useState({ lat: 79.234, lon: 45.678 });
+  const mouseRafRef = useRef<number | null>(null);
+  const pendingMouseRef = useRef<{ lat: number; lon: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (mouseRafRef.current !== null) {
+        window.cancelAnimationFrame(mouseRafRef.current);
+        mouseRafRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleMouseMove = (lat: number, lon: number) => {
+    pendingMouseRef.current = { lat, lon };
+    if (mouseRafRef.current !== null) return;
+    mouseRafRef.current = window.requestAnimationFrame(() => {
+      mouseRafRef.current = null;
+      const next = pendingMouseRef.current;
+      if (next) {
+        setMousePos(next);
+      }
+    });
+  };
 
   const routeLatLng = useMemo(() => {
     const coords = routeGeojson?.geometry?.coordinates ?? [];
@@ -111,6 +136,7 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
         minZoom={1}
         maxZoom={8}
         worldCopyJump={false}
+        preferCanvas
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -133,9 +159,7 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
 
         <MapEvents
           onMapClick={onMapClick}
-          onMouseMove={(lat, lon) => {
-            setMousePos({ lat, lon });
-          }}
+          onMouseMove={handleMouseMove}
         />
 
         <RasterTileLayer layerId="bathy" enabled={layers.bathymetry.enabled} opacity={layers.bathymetry.opacity} timestamp={timestamp} zIndex={300} />
@@ -143,6 +167,7 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
         <RasterTileLayer layerId="wave" enabled={layers.wave.enabled} opacity={layers.wave.opacity} timestamp={timestamp} zIndex={330} />
         <RasterTileLayer layerId="wind" enabled={layers.wind.enabled} opacity={layers.wind.opacity} timestamp={timestamp} zIndex={340} />
         <RasterTileLayer layerId="ais_heatmap" enabled={layers.aisHeatmap.enabled} opacity={layers.aisHeatmap.opacity} timestamp={timestamp} zIndex={360} />
+        <RasterTileLayer layerId="unet_uncertainty" enabled={layers.unetUncertainty.enabled} opacity={layers.unetUncertainty.opacity} timestamp={timestamp} zIndex={370} />
         <RasterTileLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} zIndex={380} />
 
         {showRoute && routeLatLng.length >= 2 ? (

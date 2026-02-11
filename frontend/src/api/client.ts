@@ -168,6 +168,9 @@ export type InferResponse = {
     model_version: string;
     model_summary?: string;
     device?: string;
+    uncertainty_file?: string;
+    uncertainty_mean?: number | null;
+    uncertainty_p90?: number | null;
   };
 };
 
@@ -187,6 +190,20 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function getDatasets() {
   return apiFetch<{ dataset: { months: string[] } }>("/datasets");
+}
+
+export async function getDatasetsQuality(sampleLimit = 80) {
+  return apiFetch<{
+    summary: {
+      status: "pass" | "warn" | "fail" | string;
+      timestamp_count: number;
+      first_timestamp?: string;
+      last_timestamp?: string;
+      issues_count?: number;
+    };
+    checks: Array<{ name: string; status: string; detail?: Record<string, unknown> }>;
+    issues: string[];
+  }>(`/datasets/quality?sample_limit=${encodeURIComponent(String(sampleLimit))}`);
 }
 
 export async function getTimestamps(month?: string) {

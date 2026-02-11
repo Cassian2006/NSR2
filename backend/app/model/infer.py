@@ -73,6 +73,31 @@ def _class_ratios(class_hist: dict[str, int], total: int) -> dict[str, float]:
     }
 
 
+def _uncertainty_proxy_from_pred(pred: np.ndarray) -> np.ndarray:
+    """
+    Backfill uncertainty for legacy cached predictions that were saved before
+    probability entropy export existed.
+    """
+    if pred.ndim != 2:
+        return np.zeros((0, 0), dtype=np.float32)
+    p = pred.astype(np.int16)
+    edge = np.zeros_like(p, dtype=np.float32)
+    edge[1:, :] = np.maximum(edge[1:, :], (p[1:, :] != p[:-1, :]).astype(np.float32))
+    edge[:-1, :] = np.maximum(edge[:-1, :], (p[:-1, :] != p[1:, :]).astype(np.float32))
+    edge[:, 1:] = np.maximum(edge[:, 1:], (p[:, 1:] != p[:, :-1]).astype(np.float32))
+    edge[:, :-1] = np.maximum(edge[:, :-1], (p[:, :-1] != p[:, 1:]).astype(np.float32))
+    # Small neighborhood average for a smoother proxy.
+    pad = np.pad(edge, ((1, 1), (1, 1)), mode="edge")
+    smooth = (
+        pad[1:-1, 1:-1]
+        + pad[:-2, 1:-1]
+        + pad[2:, 1:-1]
+        + pad[1:-1, :-2]
+        + pad[1:-1, 2:]
+    ) / 5.0
+    return np.clip(0.12 + 0.78 * smooth, 0.0, 1.0).astype(np.float32)
+
+
 def _resolve_summary_path(settings: Settings, model_version: str) -> Path:
     default_summary = settings.unet_default_summary
     if model_version == "unet_v1" and default_summary.exists():
@@ -168,6 +193,7 @@ def run_unet_inference(
     output_path: Path,
 ) -> dict:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    uncertainty_path = output_path.with_name(f"{output_path.stem}_uncertainty.npy")
     x = _load_x_stack(settings, timestamp=timestamp)
     expected_hw = (int(x.shape[1]), int(x.shape[2]))
 
@@ -176,12 +202,25 @@ def run_unet_inference(
         if pred.ndim == 2 and pred.shape == expected_hw:
             class_hist = _class_stats(pred)
             total = int(pred.size)
+            unc: np.ndarray | None = None
+            if uncertainty_path.exists():
+                loaded = np.load(uncertainty_path).astype(np.float32)
+                if loaded.shape == expected_hw:
+                    unc = loaded
+            if unc is None:
+                unc = _uncertainty_proxy_from_pred(pred)
+                np.save(uncertainty_path, unc.astype(np.float32))
+            uncertainty_mean = float(np.nanmean(unc))
+            uncertainty_p90 = float(np.nanpercentile(unc, 90))
             return {
                 "shape": list(pred.shape),
                 "class_hist": class_hist,
                 "class_ratio": _class_ratios(class_hist, total),
                 "cache_hit": True,
                 "model_version": model_version,
+                "uncertainty_file": str(uncertainty_path) if uncertainty_path.exists() else "",
+                "uncertainty_mean": uncertainty_mean,
+                "uncertainty_p90": uncertainty_p90,
             }
 
     _ensure_torch_available()
@@ -198,9 +237,13 @@ def run_unet_inference(
     xt = torch.from_numpy(xn[None, ...]).to(bundle.device)
     with torch.no_grad():
         logits = bundle.model(xt)
+        probs = torch.softmax(logits, dim=1)
         pred = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
+        entropy = -(probs * torch.log(probs.clamp_min(1e-8))).sum(dim=1) / float(np.log(probs.shape[1]))
+        uncertainty = entropy.squeeze(0).cpu().numpy().astype(np.float32)
 
     np.save(output_path, pred)
+    np.save(uncertainty_path, uncertainty)
     class_hist = _class_stats(pred)
     total = int(pred.size)
     return {
@@ -211,4 +254,7 @@ def run_unet_inference(
         "model_version": model_version,
         "model_summary": str(summary_path),
         "device": bundle.device,
+        "uncertainty_file": str(uncertainty_path),
+        "uncertainty_mean": float(np.nanmean(uncertainty)),
+        "uncertainty_p90": float(np.nanpercentile(uncertainty, 90)),
     }

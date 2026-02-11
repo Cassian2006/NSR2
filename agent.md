@@ -376,3 +376,39 @@
 - 2026-02-10T23:54:35.1750768Z | Added API coverage test backend/tests/test_api_smoke.py::test_dynamic_route_plan_replanning and client helper planDynamicRoute in frontend/src/api/client.ts.
 - 2026-02-10T23:54:35.1750768Z | Updated benchmark script backend/scripts/benchmark_planners.py: supports dynamic benchmark (--dynamic-window/--advance-steps), grouped summary by mode:planner, and heterogeneous CSV rows.
 - 2026-02-10T23:54:35.1750768Z | Validation: python -m pytest -q (backend) -> 45 passed; npm run build (frontend) succeeded; dynamic benchmark sample showed dynamic:dstar_lite runtime 4900ms vs dynamic:astar 5951ms (outputs/benchmarks/planner_benchmark_20260210_235344.*).
+-  | Productionized latest pipeline: added persisted progress store with recovery/pruning in ackend/app/core/latest_progress.py and startup wiring in ackend/app/main.py.
+-  | Added latest runtime concurrency guard in ackend/app/core/latest_runtime.py, /v1/latest/runtime endpoint, and 429 busy protection in ackend/app/api/routes_latest.py.
+-  | Hardened latest materialization in ackend/app/core/latest.py: per-timestamp lock, atomic writes, and configurable retry/backoff for Copernicus and remote snapshot pulls.
+-  | Validation: python -m compileall backend/app backend/tests (pass), python -m pytest -q in ackend (49 passed).
+- 2026-02-11T00:02:22Z | Productionized latest pipeline: added persisted progress store with recovery/pruning in ackend/app/core/latest_progress.py and startup wiring in ackend/app/main.py.
+- 2026-02-11T00:02:22Z | Added latest runtime concurrency guard in ackend/app/core/latest_runtime.py, /v1/latest/runtime endpoint, and 429 busy protection in ackend/app/api/routes_latest.py.
+- 2026-02-11T00:02:22Z | Hardened latest materialization in ackend/app/core/latest.py: per-timestamp lock, atomic writes, and configurable retry/backoff for Copernicus and remote snapshot pulls.
+- 2026-02-11T00:02:22Z | Validation: python -m compileall backend/app backend/tests (pass), python -m pytest -q in ackend (49 passed).
+- 2026-02-11T00:03:23Z | Added production smoke coverage for latest runtime/busy path in ackend/tests/test_api_smoke.py, plus new unit tests ackend/tests/test_latest_progress.py and ackend/tests/test_latest_runtime.py.
+- 2026-02-11T00:03:23Z | Re-validation after test additions: python -m pytest -q in ackend -> 50 passed.
+- 2026-02-11T00:10:49Z | Added annotation/model quality loop: new sample QC + hard-sample weighting utilities in ackend/app/model/train_quality.py, new combined loss ackend/app/model/losses.py, and integrated them into ackend/scripts/train_unet_quick.py (QC gate, hard resampling, focal+dice options).
+- 2026-02-11T00:10:49Z | Added standalone manifest QC tool ackend/scripts/qc_unet_manifest.py for pre-train data quality auditing.
+- 2026-02-11T00:10:49Z | Added uncertainty export/visualization pipeline: entropy/proxy uncertainty saved in ackend/app/model/infer.py, new layer unet_uncertainty in ackend/app/core/dataset.py + ackend/app/core/render.py, and frontend toggles/maps in rontend/src/pages/MapWorkspace.tsx + rontend/src/components/MapCanvas.tsx.
+- 2026-02-11T00:10:49Z | Validation: python -m compileall backend/app backend/scripts backend/tests (pass), python -m pytest -q in backend (53 passed), 
+pm run build in frontend (pass).
+- 2026-02-11T00:16:58Z | Enriched data checks and explainability: added dataset quality analyzer ackend/app/core/data_quality.py, API endpoint /v1/datasets/quality in ackend/app/api/routes_layers.py, and report script ackend/scripts/report_data_quality.py.
+- 2026-02-11T00:16:58Z | Expanded planning explain fields in ackend/app/planning/router.py: route cost decomposition (base/caution/corridor/effective), corridor P50/P90, caution/adjacent-blocked ratios, start/goal adjustment distance, and dynamic replanning runtime aggregates.
+- 2026-02-11T00:16:58Z | Frontend explainability UI updates: quality status card on scenario page (rontend/src/pages/ScenarioSelector.tsx) and richer explain panel metrics in workspace (rontend/src/pages/MapWorkspace.tsx), plus API client support (rontend/src/api/client.ts).
+- 2026-02-11T00:16:58Z | Validation: python -m compileall backend/app backend/scripts backend/tests (pass), python -m pytest -q in backend (55 passed), 
+pm run build in frontend (pass).
+- 2026-02-11T00:20:51.7446692Z | Added latest source health guard module backend/app/core/latest_source_health.py with persisted per-source failure counters and circuit-breaker cooldown (Copernicus/snapshot).
+- 2026-02-11T00:20:51.7446692Z | Integrated source health configuration and wiring: backend/app/core/config.py, backend/app/main.py, backend/app/core/latest.py; latest resolve flow now skips unhealthy sources and records success/failure for external dependencies.
+- 2026-02-11T00:20:51.7446692Z | Added observability endpoint GET /v1/latest/sources/health in backend/app/api/routes_latest.py with API smoke coverage in backend/tests/test_api_smoke.py.
+- 2026-02-11T00:20:51.7446692Z | Added unit tests backend/tests/test_latest_source_health.py covering circuit open/recover and persisted cooldown expiry behavior.
+- 2026-02-11T00:20:51.7446692Z | Validation: python -m compileall backend/app backend/tests (pass), python -m pytest -q in backend -> 58 passed.
+- 2026-02-11T00:38:12.1231125Z | Optimized D* Lite dynamic replanning in backend/app/planning/router.py: batched blocked-update + start-move into single compute_shortest_path call, added deferred sync_if_needed(), and avoided unconditional np.argwhere allocation for large grids.
+- 2026-02-11T00:38:12.1231125Z | Added D* dynamic explainability metrics: dynamic_incremental_steps, dynamic_rebuild_steps, dynamic_incremental_threshold_ratio in backend/app/planning/router.py.
+- 2026-02-11T00:38:12.1231125Z | Added tests backend/tests/test_planning_dstar_incremental.py for (1) single replan after batched D* updates and (2) incremental update_mode activation on controlled small-change dynamic states.
+- 2026-02-11T00:38:12.1231125Z | Extended benchmark utility backend/scripts/benchmark_planners.py: multi-window dynamic runs, blocked-sources parameter, and dynamic speedup summary output.
+- 2026-02-11T00:38:12.1231125Z | Validation: python -m pytest -q in backend -> 60 passed; targeted tests: test_dynamic_route_plan_replanning + test_planning_dstar_incremental -> 3 passed.
+- 2026-02-11T00:38:12.1231125Z | Benchmark results: blocked_sources=bathy,unet_blocked -> dynamic D* vs A* speedup 0.996x (approx parity); blocked_sources=bathy -> dynamic D* vs A* speedup 3.38x (runtime reduction 70.41%). Outputs: backend/outputs/benchmarks/planner_benchmark_20260211_003702.json and backend/outputs/benchmarks/planner_benchmark_20260211_003630.json.
+- 2026-02-11T00:42:02.6515869Z | Frontend/UI check completed: verified current modified frontend files and successful Vite production build (npm run build).
+- 2026-02-11T00:42:02.6515869Z | UI optimization: rewrote frontend/src/pages/ScenarioSelector.tsx to fix corrupted Chinese copy and improve timestamp usability with total-count hint (shows when only first 120 entries are listed).
+- 2026-02-11T00:42:02.6515869Z | UI optimization: improved map interaction performance in frontend/src/components/MapCanvas.tsx using requestAnimationFrame-throttled mouse position updates and Leaflet preferCanvas rendering.
+- 2026-02-11T00:42:02.6515869Z | Validation: npm run build in frontend succeeded after UI updates.
+- 2026-02-11T08:29:51.0953396Z | Pre-submit validation before GitHub submit: python -m pytest -q in backend -> 60 passed; npm run build in frontend succeeded.
