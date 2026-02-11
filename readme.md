@@ -46,8 +46,8 @@
 
 ## 2. 技术栈（与代码一致）
 
-- 前端：React 18 + Vite + TypeScript + Leaflet
-- 后端：FastAPI + Uvicorn
+- 前端：React 18并发渲染 + Vite + TypeScript + Leaflet地图
+- 后端：FastAPI + Uvicorn服务器框架/
 - 算法与模型：Python + NumPy + PyTorch（TinyUNet 推理）
 - 数据存储：`npy` + `json`
 

@@ -564,27 +564,35 @@ export default function MapWorkspace() {
   const mapStart = routedStart ?? { lat: Number.parseFloat(startLat) || 0, lon: Number.parseFloat(startLon) || 0 };
   const mapGoal = routedGoal ?? { lat: Number.parseFloat(goalLat) || 0, lon: Number.parseFloat(goalLon) || 0 };
   const useDesktopLayout = layoutMode === "desktop" || (layoutMode === "auto" && isWideViewport);
+  const mapLayoutKey = useDesktopLayout ? "desktop" : "mobile";
 
-  const pageStyle: CSSProperties = {
-    minHeight: "100%",
-    height: "100%",
-    overflow: useDesktopLayout ? "hidden" : "auto",
-  };
+  const pageStyle: CSSProperties = useDesktopLayout
+    ? {
+        minHeight: "100%",
+        height: "100%",
+        overflow: "hidden",
+      }
+    : {
+        minHeight: "100dvh",
+        height: "auto",
+        overflow: "visible",
+      };
   const shellStyle: CSSProperties = {
     display: "flex",
     flexDirection: useDesktopLayout ? "row" : "column",
-    minHeight: "100%",
+    minHeight: useDesktopLayout ? "100%" : "auto",
     height: useDesktopLayout ? "100%" : "auto",
+    gap: useDesktopLayout ? 0 : 8,
   };
   const leftPaneStyle: CSSProperties = useDesktopLayout
-    ? { width: 320, maxHeight: "none", minHeight: 0, borderBottomWidth: 0, borderRightWidth: 1 }
-    : { width: "100%", maxHeight: "50vh", borderBottomWidth: 1, borderRightWidth: 0 };
+    ? { width: 320, maxHeight: "none", minHeight: 0, borderBottomWidth: 0, borderRightWidth: 1, order: 1 }
+    : { width: "100%", maxHeight: "46dvh", minHeight: 0, borderBottomWidth: 1, borderRightWidth: 0, order: 2 };
   const mapPaneStyle: CSSProperties = useDesktopLayout
-    ? { minHeight: 520, height: "100%", flex: 1, width: 0 }
-    : { minHeight: "56vh", height: "56vh", width: "100%", flex: "0 0 auto" };
+    ? { minHeight: 520, height: "100%", flex: 1, width: 0, order: 2 }
+    : { minHeight: 320, height: "58dvh", maxHeight: "72dvh", width: "100%", flex: "0 0 auto", order: 1 };
   const rightPaneStyle: CSSProperties = useDesktopLayout
-    ? { width: 360, maxHeight: "none", minHeight: 0, borderTopWidth: 0, borderLeftWidth: 1 }
-    : { width: "100%", maxHeight: "44vh", borderTopWidth: 1, borderLeftWidth: 0 };
+    ? { width: 360, maxHeight: "none", minHeight: 0, borderTopWidth: 0, borderLeftWidth: 1, order: 3 }
+    : { width: "100%", maxHeight: "none", minHeight: 0, borderTopWidth: 1, borderLeftWidth: 0, order: 3 };
   const floatingLegendStyle: CSSProperties = {
     position: "absolute",
     bottom: useDesktopLayout ? 16 : 8,
@@ -594,7 +602,7 @@ export default function MapWorkspace() {
   };
 
   return (
-    <div className="relative h-full overflow-auto bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
+    <div className="relative bg-gradient-to-br from-gray-50 to-slate-100" style={pageStyle}>
       <div className="absolute right-3 top-3 z-50 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-md backdrop-blur-sm">
         <div className="mb-1 text-[11px] text-slate-600">布局</div>
         <div className="flex gap-1">
@@ -805,6 +813,8 @@ export default function MapWorkspace() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="astar">A*（基线）</SelectItem>
+                        <SelectItem value="any_angle">Any-Angle / Theta*（更直线路径）</SelectItem>
+                        <SelectItem value="hybrid_astar">Hybrid A*（考虑航向连续）</SelectItem>
                         <SelectItem value="dstar_lite">D* Lite（静态环境）</SelectItem>
                       </SelectContent>
                     </Select>
@@ -920,6 +930,7 @@ export default function MapWorkspace() {
       <div className="relative" style={mapPaneStyle} ref={mapCaptureRef}>
         <MapCanvas
           timestamp={timestamp}
+          layoutKey={mapLayoutKey}
           layers={layers}
           showRoute={Boolean(routeResult)}
           onMapClick={handleMapClick}

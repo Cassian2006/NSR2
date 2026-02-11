@@ -108,31 +108,11 @@ def _nearest_unblocked(
 
 
 def _line_of_sight(a: tuple[int, int], b: tuple[int, int], blocked: np.ndarray) -> bool:
-    """Integer Bresenham LOS check; false when a blocked cell is crossed."""
-    r0, c0 = a
-    r1, c1 = b
-    dr = abs(r1 - r0)
-    dc = abs(c1 - c0)
-    sr = 1 if r0 < r1 else -1
-    sc = 1 if c0 < c1 else -1
-    err = dr - dc
-
-    r, c = r0, c0
-    h, w = blocked.shape
-    while True:
-        if not (0 <= r < h and 0 <= c < w):
+    """Supercover LOS check; false when any touched blocked cell is crossed."""
+    for rr, cc in _trace_line_cells(a, b, blocked.shape):
+        if blocked[rr, cc]:
             return False
-        if blocked[r, c]:
-            return False
-        if r == r1 and c == c1:
-            return True
-        e2 = 2 * err
-        if e2 > -dc:
-            err -= dc
-            r += sr
-        if e2 < dr:
-            err += dr
-            c += sc
+    return True
 
 
 def _smooth_cells_los(cells: list[tuple[int, int]], blocked: np.ndarray) -> list[tuple[int, int]]:
@@ -154,32 +134,48 @@ def _smooth_cells_los(cells: list[tuple[int, int]], blocked: np.ndarray) -> list
 
 
 def _trace_line_cells(a: tuple[int, int], b: tuple[int, int], shape: tuple[int, int]) -> list[tuple[int, int]]:
-    """Bresenham trace of all grid cells touched from a to b (inclusive endpoints)."""
+    """Supercover trace of all touched grid cells from a to b (inclusive endpoints)."""
     r0, c0 = a
     r1, c1 = b
-    dr = abs(r1 - r0)
-    dc = abs(c1 - c0)
-    sr = 1 if r0 < r1 else -1
-    sc = 1 if c0 < c1 else -1
-    err = dr - dc
     h, w = shape
+    x0, y0 = c0, r0
+    x1, y1 = c1, r1
+    dx = x1 - x0
+    dy = y1 - y0
+    nx = abs(dx)
+    ny = abs(dy)
+    sign_x = 1 if dx > 0 else -1
+    sign_y = 1 if dy > 0 else -1
 
+    x, y = x0, y0
     out: list[tuple[int, int]] = []
-    r, c = r0, c0
-    while True:
-        if 0 <= r < h and 0 <= c < w:
-            cell = (r, c)
+
+    def _append(rr: int, cc: int) -> None:
+        if 0 <= rr < h and 0 <= cc < w:
+            cell = (rr, cc)
             if not out or out[-1] != cell:
                 out.append(cell)
-        if r == r1 and c == c1:
-            break
-        e2 = 2 * err
-        if e2 > -dc:
-            err -= dc
-            r += sr
-        if e2 < dr:
-            err += dr
-            c += sc
+
+    _append(y, x)
+
+    ix = 0
+    iy = 0
+    while ix < nx or iy < ny:
+        decision = (1 + 2 * ix) * ny - (1 + 2 * iy) * nx
+        if decision == 0:
+            _append(y + sign_y, x)
+            _append(y, x + sign_x)
+            x += sign_x
+            y += sign_y
+            ix += 1
+            iy += 1
+        elif decision < 0:
+            x += sign_x
+            ix += 1
+        else:
+            y += sign_y
+            iy += 1
+        _append(y, x)
     return out
 
 
@@ -333,6 +329,67 @@ def _transition_cost(
     return step_km * mult
 
 
+def _segment_cell_stats(
+    *,
+    from_rc: tuple[int, int],
+    to_rc: tuple[int, int],
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    near_blocked: np.ndarray | None = None,
+) -> tuple[float, float, float]:
+    """Return (caution_ratio, corridor_mean, near_blocked_ratio) along the segment."""
+    h, w = caution.shape
+    traced = _trace_line_cells(from_rc, to_rc, (h, w))
+    sampled = traced[1:] if len(traced) > 1 else traced
+    if not sampled:
+        return 0.0, 0.0, 0.0
+
+    caution_hits = 0
+    near_hits = 0
+    corridor_vals: list[float] = []
+    for rr, rc in sampled:
+        caution_hits += int(bool(caution[rr, rc]))
+        if near_blocked is not None:
+            near_hits += int(bool(near_blocked[rr, rc]))
+        corridor_vals.append(float(ais_norm[rr, rc]))
+
+    n = len(sampled)
+    caution_ratio = float(caution_hits / max(1, n))
+    near_ratio = float(near_hits / max(1, n))
+    corridor_mean = float(np.mean(corridor_vals) if corridor_vals else 0.0)
+    return caution_ratio, corridor_mean, near_ratio
+
+
+def _transition_cost_segment(
+    *,
+    from_rc: tuple[int, int],
+    to_rc: tuple[int, int],
+    geo,
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    caution_penalty: float,
+    corridor_reward: float,
+    near_blocked: np.ndarray | None = None,
+    near_blocked_penalty: float = 0.0,
+) -> float:
+    fr, fc = from_rc
+    tr, tc = to_rc
+    lat0, lon0 = geo.rc_to_latlon(fr, fc)
+    lat1, lon1 = geo.rc_to_latlon(tr, tc)
+    step_km = haversine_km(lat0, lon0, lat1, lon1)
+    caution_ratio, corridor_mean, near_ratio = _segment_cell_stats(
+        from_rc=from_rc,
+        to_rc=to_rc,
+        caution=caution,
+        ais_norm=ais_norm,
+        near_blocked=near_blocked,
+    )
+    mult = 1.0 + caution_penalty * caution_ratio + near_blocked_penalty * near_ratio
+    mult -= corridor_reward * corridor_mean
+    mult = max(0.15, mult)
+    return step_km * mult
+
+
 def _collect_path_metrics(
     *,
     cells: list[tuple[int, int]],
@@ -430,6 +487,19 @@ def _build_display_coordinates(coords: list[list[float]], iterations: int = 2) -
     return [[float(p[0]), float(p[1])] for p in points]
 
 
+def _expand_cells_supercover(cells: list[tuple[int, int]], shape: tuple[int, int]) -> list[tuple[int, int]]:
+    """Expand sparse path vertices into adjacent supercover cells for rendering safety."""
+    if len(cells) < 2:
+        return cells
+    out: list[tuple[int, int]] = [cells[0]]
+    for idx in range(1, len(cells)):
+        seg = _trace_line_cells(cells[idx - 1], cells[idx], shape)
+        for rc in seg[1:]:
+            if not out or out[-1] != rc:
+                out.append(rc)
+    return out
+
+
 def _adjacent_blocked_ratio(cells: list[tuple[int, int]], blocked: np.ndarray) -> float:
     if not cells:
         return 0.0
@@ -518,6 +588,209 @@ def _run_astar(
     if not np.isfinite(gscore[gr, gc]):
         raise PlanningError("No feasible route found under current blocked constraints.")
     return _reconstruct_path(came_from, (gr, gc))
+
+
+def _run_theta_star(
+    *,
+    geo,
+    blocked: np.ndarray,
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    km_per_row: float,
+    km_per_col_min: float,
+    caution_penalty: float,
+    corridor_reward: float,
+    near_blocked: np.ndarray | None = None,
+    near_blocked_penalty: float = 0.0,
+) -> list[tuple[int, int]]:
+    """Any-angle planning using Theta* with LOS parent rewiring."""
+    h, w = blocked.shape
+    gscore = np.full((h, w), np.inf, dtype=np.float64)
+    closed = np.zeros((h, w), dtype=bool)
+    came_from: dict[tuple[int, int], tuple[int, int]] = {}
+    parent: dict[tuple[int, int], tuple[int, int]] = {}
+
+    sr, sc = start
+    gr, gc = goal
+    gscore[sr, sc] = 0.0
+    parent[(sr, sc)] = (sr, sc)
+    heap: list[tuple[float, float, int, int]] = []
+    heapq.heappush(
+        heap,
+        (
+            _heuristic_km(sr, sc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min),
+            0.0,
+            sr,
+            sc,
+        ),
+    )
+
+    while heap:
+        _, cur_g, r, c = heapq.heappop(heap)
+        if closed[r, c]:
+            continue
+        closed[r, c] = True
+        if (r, c) == (gr, gc):
+            break
+
+        cur = (r, c)
+        par = parent.get(cur, cur)
+        for rr, cc in _neighbors(r, c, h, w):
+            if closed[rr, cc] or blocked[rr, cc]:
+                continue
+
+            nxt = (rr, cc)
+            best_parent = cur
+            cand = cur_g + _transition_cost(
+                from_rc=cur,
+                to_rc=nxt,
+                geo=geo,
+                caution=caution,
+                ais_norm=ais_norm,
+                caution_penalty=caution_penalty,
+                corridor_reward=corridor_reward,
+                near_blocked=near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
+            )
+
+            if par != cur and _line_of_sight(par, nxt, blocked):
+                par_cost = gscore[par[0], par[1]] + _transition_cost_segment(
+                    from_rc=par,
+                    to_rc=nxt,
+                    geo=geo,
+                    caution=caution,
+                    ais_norm=ais_norm,
+                    caution_penalty=caution_penalty,
+                    corridor_reward=corridor_reward,
+                    near_blocked=near_blocked,
+                    near_blocked_penalty=near_blocked_penalty,
+                )
+                if par_cost < cand:
+                    cand = par_cost
+                    best_parent = par
+
+            if cand < gscore[rr, cc]:
+                gscore[rr, cc] = cand
+                parent[nxt] = best_parent
+                came_from[nxt] = best_parent
+                hval = _heuristic_km(rr, cc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min)
+                heapq.heappush(heap, (cand + hval, cand, rr, cc))
+
+    if not np.isfinite(gscore[gr, gc]):
+        raise PlanningError("No feasible route found under current blocked constraints.")
+    return _reconstruct_path(came_from, (gr, gc))
+
+
+def _heading_bin_from_delta(dr: int, dc: int, heading_bins: int) -> int:
+    angle = math.atan2(float(dr), float(dc))
+    step = (2.0 * math.pi) / float(heading_bins)
+    return int(round((angle % (2.0 * math.pi)) / step)) % heading_bins
+
+
+def _run_hybrid_astar(
+    *,
+    geo,
+    blocked: np.ndarray,
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    km_per_row: float,
+    km_per_col_min: float,
+    caution_penalty: float,
+    corridor_reward: float,
+    near_blocked: np.ndarray | None = None,
+    near_blocked_penalty: float = 0.0,
+    heading_bins: int = 8,
+) -> list[tuple[int, int]]:
+    """Lightweight hybrid A*: heading-aware A* over (r,c,heading) with 8-neighbor expansions."""
+    h, w = blocked.shape
+    sr, sc = start
+    gr, gc = goal
+
+    init_heading = _heading_bin_from_delta(gr - sr, gc - sc, heading_bins)
+    gscore = np.full((h, w, heading_bins), np.inf, dtype=np.float64)
+    closed = np.zeros((h, w, heading_bins), dtype=bool)
+    came_from: dict[tuple[int, int, int], tuple[int, int, int]] = {}
+    goal_state: tuple[int, int, int] | None = None
+
+    gscore[sr, sc, init_heading] = 0.0
+    heap: list[tuple[float, float, int, int, int]] = []
+    heapq.heappush(
+        heap,
+        (
+            _heuristic_km(sr, sc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min),
+            0.0,
+            sr,
+            sc,
+            init_heading,
+        ),
+    )
+    turn_weight = 0.04
+    max_iter = h * w * heading_bins * 2
+    it = 0
+
+    while heap:
+        if it > max_iter:
+            raise PlanningError("Hybrid A* exceeded iteration budget.")
+        it += 1
+        _, cur_g, r, c, heading = heapq.heappop(heap)
+        if closed[r, c, heading]:
+            continue
+        closed[r, c, heading] = True
+        if (r, c) == (gr, gc):
+            goal_state = (r, c, heading)
+            break
+
+        # Local 8-neighbor expansions keep runtime bounded and guarantee feasibility close to grid A*.
+        for rr, cc in _neighbors(r, c, h, w):
+            if blocked[rr, cc]:
+                continue
+            if not _line_of_sight((r, c), (rr, cc), blocked):
+                continue
+            next_heading = _heading_bin_from_delta(rr - r, cc - c, heading_bins)
+            diff = abs(next_heading - heading)
+            diff = min(diff, heading_bins - diff)
+            seg = _transition_cost(
+                from_rc=(r, c),
+                to_rc=(rr, cc),
+                geo=geo,
+                caution=caution,
+                ais_norm=ais_norm,
+                caution_penalty=caution_penalty,
+                corridor_reward=corridor_reward,
+                near_blocked=near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
+            )
+            turn_penalty = seg * turn_weight * float(diff)
+            cand = cur_g + seg + turn_penalty
+            if cand < gscore[rr, cc, next_heading]:
+                gscore[rr, cc, next_heading] = cand
+                state = (rr, cc, next_heading)
+                came_from[state] = (r, c, heading)
+                hval = _heuristic_km(rr, cc, gr, gc, km_per_row=km_per_row, km_per_col_min=km_per_col_min)
+                heapq.heappush(heap, (cand + hval, cand, rr, cc, next_heading))
+
+    if goal_state is None:
+        raise PlanningError("No feasible route found under current blocked constraints.")
+
+    # Reconstruct (r,c,heading) and project to grid cells.
+    path_states = [goal_state]
+    cur = goal_state
+    while cur in came_from:
+        cur = came_from[cur]
+        path_states.append(cur)
+    path_states.reverse()
+
+    cells: list[tuple[int, int]] = []
+    for rr, cc, _ in path_states:
+        if not cells or cells[-1] != (rr, cc):
+            cells.append((rr, cc))
+    if not cells or cells[0] != start:
+        cells.insert(0, start)
+    return cells
 
 
 def _run_dstar_lite_static(
@@ -924,8 +1197,24 @@ def plan_grid_route_dynamic(
             raise PlanningError("Dynamic replanning requires aligned grid shape across timestamps.")
 
     planner_key = planner.strip().lower()
-    if planner_key not in {"astar", "a_star", "dstar_lite", "dstar-lite", "dstar"}:
-        raise PlanningError(f"Unsupported planner={planner}, expected astar or dstar_lite")
+    is_astar = planner_key in {"astar", "a_star"}
+    is_dstar = planner_key in {"dstar_lite", "dstar-lite", "dstar"}
+    is_any_angle = planner_key in {"any_angle", "any-angle", "theta", "theta_star", "thetastar"}
+    is_hybrid = planner_key in {"hybrid_astar", "hybrid-a*", "hybrid", "hybrid_a_star"}
+    if is_astar:
+        planner_label = "astar"
+    elif is_dstar:
+        planner_label = "dstar_lite"
+    elif is_any_angle:
+        planner_label = "any_angle"
+    elif is_hybrid:
+        planner_label = "hybrid_astar"
+    else:
+        planner_label = planner_key
+    if not (is_astar or is_dstar or is_any_angle or is_hybrid):
+        raise PlanningError(
+            f"Unsupported planner={planner}, expected one of astar, dstar_lite, any_angle, hybrid_astar"
+        )
 
     caution_penalty, corridor_reward, near_blocked_penalty = _policy_scalars(caution_mode, corridor_bias)
     km_per_row, km_per_col_min = _grid_resolution_km(states[0].bounds, h, w)
@@ -986,8 +1275,38 @@ def plan_grid_route_dynamic(
             dstar = None
             dynamic_notes.append(f"goal_adjusted_at_step_{step_idx}")
 
-        if planner_key in {"astar", "a_star"}:
+        if is_astar:
             current_cells = _run_astar(
+                geo=state.geo,
+                blocked=state.blocked,
+                caution=state.caution,
+                ais_norm=state.ais_norm,
+                start=current_start,
+                goal=current_goal,
+                km_per_row=km_per_row,
+                km_per_col_min=km_per_col_min,
+                caution_penalty=caution_penalty,
+                corridor_reward=corridor_reward,
+                near_blocked=state.near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
+            )
+        elif is_any_angle:
+            current_cells = _run_theta_star(
+                geo=state.geo,
+                blocked=state.blocked,
+                caution=state.caution,
+                ais_norm=state.ais_norm,
+                start=current_start,
+                goal=current_goal,
+                km_per_row=km_per_row,
+                km_per_col_min=km_per_col_min,
+                caution_penalty=caution_penalty,
+                corridor_reward=corridor_reward,
+                near_blocked=state.near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
+            )
+        elif is_hybrid:
+            current_cells = _run_hybrid_astar(
                 geo=state.geo,
                 blocked=state.blocked,
                 caution=state.caution,
@@ -1145,6 +1464,14 @@ def plan_grid_route_dynamic(
 
     incremental_steps = int(sum(1 for r in replans if r.get("update_mode") == "incremental"))
     rebuild_steps = int(sum(1 for r in replans if r.get("update_mode") == "rebuild"))
+    if is_dstar:
+        planner_label = "dstar_lite_incremental"
+    elif is_any_angle:
+        planner_label = "any_angle_recompute"
+    elif is_hybrid:
+        planner_label = "hybrid_astar_recompute"
+    else:
+        planner_label = "astar_recompute"
     explain = {
         "distance_km": round(float(total_distance_km), 3),
         "distance_nm": round(float(total_distance_km) * 0.539957, 3),
@@ -1165,7 +1492,7 @@ def plan_grid_route_dynamic(
         "goal_adjusted": goal_adjusted,
         "start_adjust_km": round(float(start_adjust_km), 3),
         "goal_adjust_km": round(float(goal_adjust_km), 3),
-        "planner": "dstar_lite_incremental" if planner_key in {"dstar_lite", "dstar-lite", "dstar"} else "astar_recompute",
+        "planner": planner_label,
         "dynamic_replans": replans,
         "dynamic_advance_steps": int(advance_steps),
         "dynamic_timestamps": timestamps,
@@ -1185,7 +1512,10 @@ def plan_grid_route_dynamic(
         "replan_changed_cells_total": int(sum(int(r.get("changed_blocked_cells", 0)) for r in replans)),
     }
 
-    display_coords = _build_display_coordinates(executed_coords)
+    if is_any_angle or is_hybrid:
+        display_coords = executed_coords
+    else:
+        display_coords = _build_display_coordinates(executed_coords)
     route_geojson = {
         "type": "Feature",
         "geometry": {"type": "LineString", "coordinates": executed_coords},
@@ -1275,7 +1605,21 @@ def plan_grid_route(
     sr, sc = s_rc_adj
     gr, gc = g_rc_adj
     planner_key = planner.strip().lower()
-    if planner_key in {"astar", "a_star"}:
+    is_astar = planner_key in {"astar", "a_star"}
+    is_dstar = planner_key in {"dstar_lite", "dstar-lite", "dstar"}
+    is_any_angle = planner_key in {"any_angle", "any-angle", "theta", "theta_star", "thetastar"}
+    is_hybrid = planner_key in {"hybrid_astar", "hybrid-a*", "hybrid", "hybrid_a_star"}
+    if is_astar:
+        planner_label = "astar"
+    elif is_dstar:
+        planner_label = "dstar_lite"
+    elif is_any_angle:
+        planner_label = "any_angle"
+    elif is_hybrid:
+        planner_label = "hybrid_astar"
+    else:
+        planner_label = planner_key
+    if is_astar:
         cells = _run_astar(
             geo=geo,
             blocked=blocked,
@@ -1290,7 +1634,7 @@ def plan_grid_route(
             near_blocked=near_blocked,
             near_blocked_penalty=near_blocked_penalty,
         )
-    elif planner_key in {"dstar_lite", "dstar-lite", "dstar"}:
+    elif is_dstar:
         cells = _run_dstar_lite_static(
             geo=geo,
             blocked=blocked,
@@ -1303,12 +1647,46 @@ def plan_grid_route(
             near_blocked=near_blocked,
             near_blocked_penalty=near_blocked_penalty,
         )
+    elif is_any_angle:
+        cells = _run_theta_star(
+            geo=geo,
+            blocked=blocked,
+            caution=caution,
+            ais_norm=ais_norm,
+            start=(sr, sc),
+            goal=(gr, gc),
+            km_per_row=km_per_row,
+            km_per_col_min=km_per_col_min,
+            caution_penalty=caution_penalty,
+            corridor_reward=corridor_reward,
+            near_blocked=near_blocked,
+            near_blocked_penalty=near_blocked_penalty,
+        )
+    elif is_hybrid:
+        cells = _run_hybrid_astar(
+            geo=geo,
+            blocked=blocked,
+            caution=caution,
+            ais_norm=ais_norm,
+            start=(sr, sc),
+            goal=(gr, gc),
+            km_per_row=km_per_row,
+            km_per_col_min=km_per_col_min,
+            caution_penalty=caution_penalty,
+            corridor_reward=corridor_reward,
+            near_blocked=near_blocked,
+            near_blocked_penalty=near_blocked_penalty,
+        )
     else:
-        raise PlanningError(f"Unsupported planner={planner}, expected astar or dstar_lite")
+        raise PlanningError(
+            f"Unsupported planner={planner}, expected one of astar, dstar_lite, any_angle, hybrid_astar"
+        )
 
     raw_cells = cells[:]
     if smoothing:
         cells = _smooth_cells_los(cells, blocked)
+    if is_any_angle or is_hybrid:
+        cells = _expand_cells_supercover(cells, blocked.shape)
 
     coords: list[list[float]] = []
     for r, c in cells:
@@ -1365,7 +1743,7 @@ def plan_grid_route(
         "blocked_ratio": round(float(blocked.mean()), 4),
         "adjacent_blocked_ratio": round(float(near_blocked_hits / max(1, sample_count)), 4),
         "caution_cell_ratio": round(float(caution_hits / max(1, sample_count)), 4),
-        "planner": planner_key,
+        "planner": planner_label,
         "grid_bounds": {
             "lat_min": bounds.lat_min,
             "lat_max": bounds.lat_max,
@@ -1374,7 +1752,10 @@ def plan_grid_route(
         },
     }
 
-    display_coords = _build_display_coordinates(coords)
+    if is_any_angle or is_hybrid:
+        display_coords = coords
+    else:
+        display_coords = _build_display_coordinates(coords)
     route_geojson = {
         "type": "Feature",
         "geometry": {"type": "LineString", "coordinates": coords},

@@ -16,6 +16,13 @@ def test_line_of_sight_false_when_crossing_blocked() -> None:
     assert _line_of_sight((0, 0), (9, 9), blocked) is False
 
 
+def test_line_of_sight_false_for_corner_squeeze() -> None:
+    blocked = np.zeros((3, 3), dtype=bool)
+    blocked[0, 1] = True
+    blocked[1, 0] = True
+    assert _line_of_sight((0, 0), (1, 1), blocked) is False
+
+
 def test_smooth_cells_los_reduces_path_without_obstacles() -> None:
     blocked = np.zeros((10, 10), dtype=bool)
     path = [(0, 0), (1, 1), (2, 2), (3, 3), (5, 5), (9, 9)]

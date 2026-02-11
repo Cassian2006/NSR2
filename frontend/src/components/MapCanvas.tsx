@@ -6,6 +6,7 @@ import {
   Polyline,
   Rectangle,
   TileLayer,
+  useMap,
   useMapEvents,
 } from "react-leaflet";
 import type { LatLngBoundsExpression } from "leaflet";
@@ -17,6 +18,7 @@ import { useLanguage } from "../contexts/LanguageContext";
 
 interface MapCanvasProps {
   timestamp: string;
+  layoutKey?: string;
   layers: {
     bathymetry: { enabled: boolean; opacity: number };
     aisHeatmap: { enabled: boolean; opacity: number };
@@ -96,7 +98,34 @@ function MapEvents({
   return null;
 }
 
-export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, start, goal, onMapClick }: MapCanvasProps) {
+function MapResizeGuard({ layoutKey }: { layoutKey: string }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const refresh = () => {
+      map.invalidateSize({ pan: false });
+    };
+    const t1 = window.setTimeout(refresh, 0);
+    const t2 = window.setTimeout(refresh, 180);
+    const t3 = window.setTimeout(refresh, 520);
+    window.addEventListener("resize", refresh, { passive: true });
+    window.addEventListener("orientationchange", refresh, { passive: true });
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", refresh);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+      window.removeEventListener("resize", refresh);
+      window.removeEventListener("orientationchange", refresh);
+      viewport?.removeEventListener("resize", refresh);
+    };
+  }, [layoutKey, map]);
+
+  return null;
+}
+
+export default function MapCanvas({ timestamp, layoutKey = "auto", layers, showRoute, routeGeojson, start, goal, onMapClick }: MapCanvasProps) {
   const { t } = useLanguage();
   const [mousePos, setMousePos] = useState({ lat: 79.234, lon: 45.678 });
   const mouseRafRef = useRef<number | null>(null);
@@ -140,6 +169,7 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
         worldCopyJump={false}
         preferCanvas
       >
+        <MapResizeGuard layoutKey={`${layoutKey}:${timestamp}`} />
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"

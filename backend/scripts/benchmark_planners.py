@@ -24,6 +24,22 @@ def _parse_blocked_sources(raw: str) -> list[str]:
     return items or ["bathy", "unet_blocked"]
 
 
+def _parse_planners(raw: str) -> list[str]:
+    allow = {"astar", "dstar_lite", "any_angle", "hybrid_astar"}
+    planners: list[str] = []
+    for item in raw.split(","):
+        val = item.strip().lower()
+        if not val:
+            continue
+        if val not in allow:
+            raise ValueError(f"Unsupported planner '{val}', expected one of {sorted(allow)}")
+        if val not in planners:
+            planners.append(val)
+    if not planners:
+        raise ValueError("At least one planner is required.")
+    return planners
+
+
 def _pick_timestamps(limit: int) -> list[str]:
     service = get_dataset_service()
     all_ts = service.list_timestamps(month="all")
@@ -229,11 +245,17 @@ def summarize(rows: list[dict]) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark A* vs D* Lite on same scenarios")
+    parser = argparse.ArgumentParser(description="Benchmark multiple planners on same scenarios")
     parser.add_argument("--start", type=str, default="70.5,30.0", help="start lat,lon")
     parser.add_argument("--goal", type=str, default="72.0,150.0", help="goal lat,lon")
     parser.add_argument("--timestamps", type=int, default=12, help="sample count across full timeline")
     parser.add_argument("--corridor-bias", type=float, default=0.2)
+    parser.add_argument(
+        "--planners",
+        type=str,
+        default="astar,dstar_lite,any_angle,hybrid_astar",
+        help="comma-separated planners, e.g. astar,dstar_lite,any_angle,hybrid_astar",
+    )
     parser.add_argument(
         "--blocked-sources",
         type=str,
@@ -249,8 +271,8 @@ def main() -> None:
     start = _parse_latlon(args.start)
     goal = _parse_latlon(args.goal)
     blocked_sources = _parse_blocked_sources(args.blocked_sources)
+    planners = _parse_planners(args.planners)
     timestamps = _pick_timestamps(args.timestamps)
-    planners = ["astar", "dstar_lite"]
     rows = run_benchmark(
         start=start,
         goal=goal,

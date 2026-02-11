@@ -169,6 +169,18 @@ def test_route_plan_modes(client: TestClient) -> None:
     assert "adjacent_blocked_ratio" in explain
     assert "corridor_alignment_p90" in explain
 
+    payload["policy"]["planner"] = "any_angle"
+    resp_any = client.post("/v1/route/plan", json=payload)
+    assert resp_any.status_code == 200
+    explain_any = resp_any.json()["explain"]
+    assert explain_any["planner"] == "any_angle"
+
+    payload["policy"]["planner"] = "hybrid_astar"
+    resp_hybrid = client.post("/v1/route/plan", json=payload)
+    assert resp_hybrid.status_code == 200
+    explain_hybrid = resp_hybrid.json()["explain"]
+    assert explain_hybrid["planner"] == "hybrid_astar"
+
 
 def test_dynamic_route_plan_replanning(client: TestClient) -> None:
     ts_resp = client.get("/v1/timestamps")
@@ -210,6 +222,12 @@ def test_dynamic_route_plan_replanning(client: TestClient) -> None:
     assert resp_astar.status_code == 200
     explain_astar = resp_astar.json()["explain"]
     assert explain_astar["planner"] == "astar_recompute"
+
+    payload["policy"]["planner"] = "any_angle"
+    resp_any = client.post("/v1/route/plan/dynamic", json=payload)
+    assert resp_any.status_code == 200
+    explain_any = resp_any.json()["explain"]
+    assert explain_any["planner"] == "any_angle_recompute"
 
 
 def test_latest_plan_fallback(client: TestClient) -> None:
