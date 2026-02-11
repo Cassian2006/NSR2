@@ -24,8 +24,11 @@ Defaults in Docker image:
 
 This means a small built-in demo dataset is available even on free Render without disks.
 
+If `NSR_DATA_ROOT` points to an empty/non-existent path, backend now auto-falls back to bundled `backend/demo_data`.
+
 Optional for same-domain deployment:
 - `NSR_CORS_ORIGIN_REGEX=^https://.*\.onrender\.com$`
+- `NSR_DISABLE_TORCH=1` (recommended for 512MB free-tier instances)
 
 Usually `VITE_API_BASE_URL` is not required now:
 - frontend default is same-origin `/v1`
@@ -65,6 +68,9 @@ If base map appears but overlay layers are empty or `U-Net` shows as missing:
 4. If `torch` is unavailable in Render runtime:
    - backend now falls back to heuristic `unet_pred/unet_uncertainty` generation from environmental channels.
    - first tile request for `unet_pred` may be slower because it materializes cache on demand.
+5. If Render reports `Ran out of memory (used over 512MB)`:
+   - set `NSR_DISABLE_TORCH=1` to force lightweight heuristic inference path.
+   - avoid enabling all heavy layers simultaneously on first load.
 
 ## 5. Health Check
 - Path: `/healthz`

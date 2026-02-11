@@ -452,3 +452,10 @@ pm run build in frontend (pass).
 
 - 2026-02-11T11:46:39+00:00 | Committed eb673c6: ship Render demo dataset subset + Docker default demo data paths + settings path-derivation fix + config regression test.
 - 2026-02-11T11:46:39+00:00 | Pushed eb673c6 to origin/main for Render redeploy.
+- 2026-02-11T11:53:15+00:00 | Mobile layout refinement: centered map container on small screens, constrained map viewport height, and stacked dashboard panels below with page scroll in frontend/src/pages/MapWorkspace.tsx.
+- 2026-02-11T11:53:15+00:00 | Validation: npm run build in frontend succeeded after mobile layout update.
+- 2026-02-11T12:11:34+00:00 | Render reliability hardening: backend/app/core/config.py now auto-falls back to bundled demo_data when configured NSR_DATA_ROOT has no annotation samples; ais_heatmap root also falls back if empty.
+- 2026-02-11T12:11:34+00:00 | Added low-memory switch in backend/app/model/infer.py: NSR_DISABLE_TORCH=1 forces heuristic inference path even if torch is installed, reducing 512MB Render risk.
+- 2026-02-11T12:11:34+00:00 | Updated DEPLOY_RENDER.md with NSR_DISABLE_TORCH guidance and OOM troubleshooting notes.
+- 2026-02-11T12:11:34+00:00 | Test updates: backend/tests/test_config_paths.py adjusted for fallback behavior and added demo fallback coverage.
+- 2026-02-11T12:11:34+00:00 | Validation: python -m pytest -q in backend -> 69 passed; npm run build in frontend succeeded.

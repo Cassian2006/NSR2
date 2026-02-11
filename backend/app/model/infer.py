@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -9,13 +10,18 @@ from typing import Any
 import numpy as np
 from app.core.config import Settings
 
-try:
-    import torch
-except ModuleNotFoundError as exc:  # pragma: no cover - exercised in non-torch deploy envs
+_disable_torch = os.getenv("NSR_DISABLE_TORCH", "").strip().lower() in {"1", "true", "yes", "on"}
+if _disable_torch:
     torch = None  # type: ignore[assignment]
-    _torch_import_error: Exception | None = exc
+    _torch_import_error: Exception | None = RuntimeError("torch disabled by NSR_DISABLE_TORCH")
 else:
-    _torch_import_error = None
+    try:
+        import torch
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised in non-torch deploy envs
+        torch = None  # type: ignore[assignment]
+        _torch_import_error = exc
+    else:
+        _torch_import_error = None
 
 
 class InferenceError(RuntimeError):

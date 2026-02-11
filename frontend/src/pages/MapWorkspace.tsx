@@ -575,7 +575,8 @@ export default function MapWorkspace() {
     : {
         minHeight: "100dvh",
         height: "auto",
-        overflow: "visible",
+        overflowX: "hidden",
+        overflowY: "auto",
       };
   const shellStyle: CSSProperties = {
     display: "flex",
@@ -583,16 +584,24 @@ export default function MapWorkspace() {
     minHeight: useDesktopLayout ? "100%" : "auto",
     height: useDesktopLayout ? "100%" : "auto",
     gap: useDesktopLayout ? 0 : 8,
+    alignItems: useDesktopLayout ? "stretch" : "center",
   };
   const leftPaneStyle: CSSProperties = useDesktopLayout
     ? { width: 320, maxHeight: "none", minHeight: 0, borderBottomWidth: 0, borderRightWidth: 1, order: 1 }
-    : { width: "100%", maxHeight: "46dvh", minHeight: 0, borderBottomWidth: 1, borderRightWidth: 0, order: 2 };
+    : { width: "min(100%, 1100px)", maxHeight: "none", minHeight: 0, borderBottomWidth: 1, borderRightWidth: 0, order: 2 };
   const mapPaneStyle: CSSProperties = useDesktopLayout
     ? { minHeight: 520, height: "100%", flex: 1, width: 0, order: 2 }
-    : { minHeight: 320, height: "58dvh", maxHeight: "72dvh", width: "100%", flex: "0 0 auto", order: 1 };
+    : {
+        minHeight: 300,
+        height: "clamp(320px, 54dvh, 620px)",
+        maxHeight: "66dvh",
+        width: "min(100%, 1100px)",
+        flex: "0 0 auto",
+        order: 1,
+      };
   const rightPaneStyle: CSSProperties = useDesktopLayout
     ? { width: 360, maxHeight: "none", minHeight: 0, borderTopWidth: 0, borderLeftWidth: 1, order: 3 }
-    : { width: "100%", maxHeight: "none", minHeight: 0, borderTopWidth: 1, borderLeftWidth: 0, order: 3 };
+    : { width: "min(100%, 1100px)", maxHeight: "none", minHeight: 0, borderTopWidth: 1, borderLeftWidth: 0, order: 3 };
   const floatingLegendStyle: CSSProperties = {
     position: "absolute",
     bottom: useDesktopLayout ? 16 : 8,
@@ -928,37 +937,39 @@ export default function MapWorkspace() {
       </div>
 
       <div className="relative" style={mapPaneStyle} ref={mapCaptureRef}>
-        <MapCanvas
-          timestamp={timestamp}
-          layoutKey={mapLayoutKey}
-          layers={layers}
-          showRoute={Boolean(routeResult)}
-          onMapClick={handleMapClick}
-          routeGeojson={routeResult?.route_geojson}
-          start={mapStart}
-          goal={mapGoal}
-        />
-        {pickTarget ? (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-xs text-white">
-            {pickTarget === "start" ? t("workspace.pick.start.hint") : t("workspace.pick.goal.hint")}
-          </div>
-        ) : null}
-
-        <div style={floatingLegendStyle}>
-          <LegendCard
-              title="当前图层"
-            items={[
-              ...(layers.unetZones.enabled
-                ? [
-                    { color: "#10b981", label: "安全" },
-                    { color: "#f59e0b", label: "谨慎" },
-                    { color: "#ef4444", label: "禁行" },
-                  ]
-                : []),
-              ...(layers.unetUncertainty.enabled ? [{ color: "rgba(220, 38, 38, 0.75)", label: "U-Net 不确定性" }] : []),
-              ...(layers.aisHeatmap.enabled ? [{ color: "#3b82f6", label: "AIS 航道热力" }] : []),
-            ]}
+        <div className="relative h-full w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md">
+          <MapCanvas
+            timestamp={timestamp}
+            layoutKey={mapLayoutKey}
+            layers={layers}
+            showRoute={Boolean(routeResult)}
+            onMapClick={handleMapClick}
+            routeGeojson={routeResult?.route_geojson}
+            start={mapStart}
+            goal={mapGoal}
           />
+          {pickTarget ? (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-xs text-white">
+              {pickTarget === "start" ? t("workspace.pick.start.hint") : t("workspace.pick.goal.hint")}
+            </div>
+          ) : null}
+
+          <div style={floatingLegendStyle}>
+            <LegendCard
+                title="当前图层"
+              items={[
+                ...(layers.unetZones.enabled
+                  ? [
+                      { color: "#10b981", label: "安全" },
+                      { color: "#f59e0b", label: "谨慎" },
+                      { color: "#ef4444", label: "禁行" },
+                    ]
+                  : []),
+                ...(layers.unetUncertainty.enabled ? [{ color: "rgba(220, 38, 38, 0.75)", label: "U-Net 不确定性" }] : []),
+                ...(layers.aisHeatmap.enabled ? [{ color: "#3b82f6", label: "AIS 航道热力" }] : []),
+              ]}
+            />
+          </div>
         </div>
       </div>
 

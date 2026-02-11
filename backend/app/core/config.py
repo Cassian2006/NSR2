@@ -66,6 +66,35 @@ class Settings(BaseSettings):
         return [v.strip() for v in self.cors_origins.split(",") if v.strip()]
 
 
+def _has_annotation_samples(annotation_pack_root: Path) -> bool:
+    if not annotation_pack_root.exists() or not annotation_pack_root.is_dir():
+        return False
+    for folder in annotation_pack_root.iterdir():
+        if not folder.is_dir():
+            continue
+        if (folder / "x_stack.npy").exists() and (folder / "blocked_mask.npy").exists():
+            return True
+    return False
+
+
+def _has_any_heatmap_files(heatmap_root: Path) -> bool:
+    if not heatmap_root.exists() or not heatmap_root.is_dir():
+        return False
+    return any(heatmap_root.rglob("*.npy"))
+
+
+def _resolve_demo_data_root(project_root: Path) -> Path | None:
+    candidates = [
+        project_root / "backend" / "demo_data",
+        project_root / "demo_data",
+    ]
+    for candidate in candidates:
+        ann_root = candidate / "processed" / "annotation_pack"
+        if _has_annotation_samples(ann_root):
+            return candidate
+    return None
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     settings = Settings()
@@ -95,6 +124,23 @@ def get_settings() -> Settings:
         settings.latest_source_health_path = settings.latest_root / "source_health.json"
     if "unet_default_summary" not in provided:
         settings.unet_default_summary = settings.outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
+
+    # Free-tier deployment safeguard:
+    # If configured roots have no usable samples, auto-fallback to bundled demo_data.
+    if not _has_annotation_samples(settings.annotation_pack_root):
+        demo_root = _resolve_demo_data_root(settings.project_root)
+        if demo_root is not None:
+            settings.data_root = demo_root
+            settings.processed_samples_root = demo_root / "processed" / "samples"
+            settings.annotation_pack_root = demo_root / "processed" / "annotation_pack"
+            settings.env_grids_root = demo_root / "interim" / "env_grids"
+            settings.dataset_index_path = demo_root / "processed" / "dataset" / "index.json"
+            settings.ais_heatmap_root = demo_root / "ais_heatmap"
+
+    if not _has_any_heatmap_files(settings.ais_heatmap_root):
+        demo_root = _resolve_demo_data_root(settings.project_root)
+        if demo_root is not None:
+            settings.ais_heatmap_root = demo_root / "ais_heatmap"
 
     settings.outputs_root.mkdir(parents=True, exist_ok=True)
     settings.latest_root.mkdir(parents=True, exist_ok=True)
