@@ -12,6 +12,7 @@ import numpy as np
 
 from app.core.config import Settings
 from app.core.geo import GridGeo, load_grid_geo
+from app.model.infer import InferenceError, run_unet_inference
 
 
 @dataclass(frozen=True)
@@ -317,12 +318,33 @@ def _load_layer_grid(settings: Settings, timestamp: str, layer: str) -> np.ndarr
 
     if layer == "unet_pred":
         pred_path = settings.pred_root / "unet_v1" / f"{timestamp}.npy"
+        if not pred_path.exists():
+            try:
+                run_unet_inference(
+                    settings=settings,
+                    timestamp=timestamp,
+                    model_version="unet_v1",
+                    output_path=pred_path,
+                )
+            except InferenceError:
+                return None
         if pred_path.exists():
             return np.load(pred_path).astype(np.float32)
         return None
 
     if layer == "unet_uncertainty":
         unc_path = settings.pred_root / "unet_v1" / f"{timestamp}_uncertainty.npy"
+        if not unc_path.exists():
+            pred_path = settings.pred_root / "unet_v1" / f"{timestamp}.npy"
+            try:
+                run_unet_inference(
+                    settings=settings,
+                    timestamp=timestamp,
+                    model_version="unet_v1",
+                    output_path=pred_path,
+                )
+            except InferenceError:
+                return None
         if unc_path.exists():
             return np.load(unc_path).astype(np.float32)
         return None

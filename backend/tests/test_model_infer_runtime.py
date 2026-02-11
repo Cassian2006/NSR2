@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from app.core.config import Settings
@@ -84,3 +85,53 @@ def test_run_unet_inference_persists_and_hits_cache(tmp_path: Path) -> None:
     assert second["cache_hit"] is True
     assert second["class_hist"]["safe"] + second["class_hist"]["caution"] + second["class_hist"]["blocked"] == 24 * 24
     assert second["uncertainty_file"].endswith(f"{ts}_uncertainty.npy")
+
+
+def test_run_unet_inference_uses_heuristic_fallback_when_torch_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ts = "2024-07-01_06"
+    annotation_dir = tmp_path / "data" / "processed" / "annotation_pack" / ts
+    annotation_dir.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(42)
+    x = rng.normal(0.0, 1.0, size=(7, 24, 24)).astype(np.float32)
+    np.save(annotation_dir / "x_stack.npy", x)
+    blocked = np.zeros((24, 24), dtype=np.uint8)
+    blocked[:3, :] = 1
+    np.save(annotation_dir / "blocked_mask.npy", blocked)
+    (annotation_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "channel_names": [
+                    "ice_conc",
+                    "ice_thick",
+                    "wave_hs",
+                    "wind_u10",
+                    "wind_v10",
+                    "bathy",
+                    "ais_heatmap",
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary_path = tmp_path / "outputs" / "train_runs" / "fake_run" / "summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text("{}", encoding="utf-8")
+    settings = _build_test_settings(tmp_path=tmp_path, summary_path=summary_path)
+    out_file = settings.pred_root / "unet_v1" / f"{ts}.npy"
+
+    import app.model.infer as infer_module
+
+    monkeypatch.setattr(infer_module, "torch", None, raising=False)
+    monkeypatch.setattr(infer_module, "_torch_import_error", ModuleNotFoundError("torch unavailable"), raising=False)
+
+    stats = run_unet_inference(
+        settings=settings,
+        timestamp=ts,
+        model_version="unet_v1",
+        output_path=out_file,
+    )
+    assert stats["fallback_mode"] == "heuristic_no_torch"
+    assert out_file.exists()
+    unc_file = settings.pred_root / "unet_v1" / f"{ts}_uncertainty.npy"
+    assert unc_file.exists()

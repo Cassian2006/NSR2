@@ -45,6 +45,19 @@ For `latest` live Copernicus pull, set:
   - `NSR_DATA_ROOT`
   - `NSR_OUTPUTS_ROOT`
 
+### Render Layer Missing Troubleshooting
+If base map appears but overlay layers are empty or `U-Net` shows as missing:
+1. Open `GET /v1/datasets` and check `sample_count`:
+   - `0` means your container has no dataset mounted.
+2. Ensure `NSR_DATA_ROOT` points to a mounted disk path that contains:
+   - `processed/annotation_pack/<timestamp>/x_stack.npy`
+   - `processed/annotation_pack/<timestamp>/blocked_mask.npy`
+3. Ensure `NSR_OUTPUTS_ROOT` points to writable persistent storage for:
+   - `pred/unet_v1/*.npy`
+4. If `torch` is unavailable in Render runtime:
+   - backend now falls back to heuristic `unet_pred/unet_uncertainty` generation from environmental channels.
+   - first tile request for `unet_pred` may be slower because it materializes cache on demand.
+
 ## 5. Health Check
 - Path: `/healthz`
 

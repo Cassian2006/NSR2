@@ -413,3 +413,9 @@ pm run build in frontend (pass).
 - 2026-02-11T00:42:02.6515869Z | Validation: npm run build in frontend succeeded after UI updates.
 - 2026-02-11T08:29:51.0953396Z | Pre-submit validation before GitHub submit: python -m pytest -q in backend -> 60 passed; npm run build in frontend succeeded.
 - 2026-02-11T08:30:19.8734105Z | Created commit 0cf6acf (latest pipeline hardening + D* dynamic optimization + frontend UI polish) and pushed to origin/main.
+- 2026-02-11T09:43:43.3889545Z | Fixed Render layer availability path: backend/app/core/dataset.py now reports unet_pred/unet_uncertainty available when annotation_pack inference inputs exist, and ice/wave/wind availability can derive from annotation channel_names instead of raw nc-only checks.
+- 2026-02-11T09:43:43.3889545Z | Added lazy on-demand U-Net materialization in backend/app/core/render.py for unet_pred/unet_uncertainty tile/overlay requests (calls run_unet_inference when cache is missing).
+- 2026-02-11T09:43:43.3889545Z | Added no-torch inference fallback in backend/app/model/infer.py: heuristic unet_pred + uncertainty generation from env channels and blocked mask, persisted to outputs/pred/unet_v1.
+- 2026-02-11T09:43:43.3889545Z | Added tests backend/tests/test_dataset_layers_availability.py and expanded backend/tests/test_model_infer_runtime.py for no-torch heuristic fallback.
+- 2026-02-11T09:43:43.3889545Z | Updated DEPLOY_RENDER.md troubleshooting section for missing layers/unet on Render with sample_count and NSR_DATA_ROOT/NSR_OUTPUTS_ROOT checks.
+- 2026-02-11T09:43:43.3889545Z | Validation: python -m pytest -q in backend -> 62 passed; npm run build in frontend succeeded.

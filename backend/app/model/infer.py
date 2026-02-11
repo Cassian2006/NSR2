@@ -185,6 +185,105 @@ def _load_x_stack(settings: Settings, timestamp: str) -> np.ndarray:
     return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+def _load_channel_names(settings: Settings, timestamp: str, in_channels: int) -> list[str]:
+    meta_path = settings.annotation_pack_root / timestamp / "meta.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            names = meta.get("channel_names")
+            if isinstance(names, list) and len(names) == in_channels:
+                return [str(v) for v in names]
+        except Exception:
+            pass
+    return [f"ch_{i}" for i in range(in_channels)]
+
+
+def _load_blocked_mask(settings: Settings, timestamp: str, shape: tuple[int, int]) -> np.ndarray:
+    blocked_path = settings.annotation_pack_root / timestamp / "blocked_mask.npy"
+    if not blocked_path.exists():
+        return np.zeros(shape, dtype=bool)
+    blocked = np.load(blocked_path).astype(np.uint8) > 0
+    if blocked.shape != shape:
+        return np.zeros(shape, dtype=bool)
+    return blocked
+
+
+def _normalize_within_sea(field: np.ndarray, sea_mask: np.ndarray) -> np.ndarray:
+    v = np.nan_to_num(field.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    vals = v[sea_mask]
+    if vals.size == 0:
+        return np.zeros_like(v, dtype=np.float32)
+    lo = float(np.percentile(vals, 5))
+    hi = float(np.percentile(vals, 95))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        hi = lo + 1.0
+    out = np.clip((v - lo) / (hi - lo), 0.0, 1.0)
+    return out.astype(np.float32)
+
+
+def _run_heuristic_fallback(
+    *,
+    settings: Settings,
+    timestamp: str,
+    model_version: str,
+    x: np.ndarray,
+    output_path: Path,
+    uncertainty_path: Path,
+) -> dict:
+    h, w = int(x.shape[1]), int(x.shape[2])
+    channel_names = _load_channel_names(settings, timestamp, in_channels=int(x.shape[0]))
+    blocked = _load_blocked_mask(settings, timestamp, shape=(h, w))
+    sea = ~blocked
+
+    def idx(name: str) -> int | None:
+        try:
+            return channel_names.index(name)
+        except ValueError:
+            return None
+
+    ice_idx = idx("ice_conc")
+    wave_idx = idx("wave_hs")
+    u_idx = idx("wind_u10")
+    v_idx = idx("wind_v10")
+
+    ice = _normalize_within_sea(x[ice_idx], sea) if ice_idx is not None else np.zeros((h, w), dtype=np.float32)
+    wave = _normalize_within_sea(x[wave_idx], sea) if wave_idx is not None else np.zeros((h, w), dtype=np.float32)
+    if u_idx is not None and v_idx is not None:
+        wind_speed = np.sqrt(np.square(x[u_idx]) + np.square(x[v_idx])).astype(np.float32)
+        wind = _normalize_within_sea(wind_speed, sea)
+    else:
+        wind = np.zeros((h, w), dtype=np.float32)
+
+    risk = 0.5 * ice + 0.3 * wave + 0.2 * wind
+    sea_vals = risk[sea]
+    threshold = float(np.percentile(sea_vals, 82)) if sea_vals.size else 1.0
+    caution = sea & (risk >= threshold)
+
+    pred = np.zeros((h, w), dtype=np.uint8)
+    pred[caution] = 1
+    pred[blocked] = 2
+
+    uncertainty = np.clip(1.0 - np.abs(risk - threshold) / 0.35, 0.0, 1.0).astype(np.float32)
+    uncertainty[blocked] = 0.05
+
+    np.save(output_path, pred)
+    np.save(uncertainty_path, uncertainty)
+
+    class_hist = _class_stats(pred)
+    total = int(pred.size)
+    return {
+        "shape": [h, w],
+        "class_hist": class_hist,
+        "class_ratio": _class_ratios(class_hist, total),
+        "cache_hit": False,
+        "model_version": model_version,
+        "fallback_mode": "heuristic_no_torch",
+        "uncertainty_file": str(uncertainty_path),
+        "uncertainty_mean": float(np.nanmean(uncertainty)),
+        "uncertainty_p90": float(np.nanpercentile(uncertainty, 90)),
+    }
+
+
 def run_unet_inference(
     *,
     settings: Settings,
@@ -223,7 +322,15 @@ def run_unet_inference(
                 "uncertainty_p90": uncertainty_p90,
             }
 
-    _ensure_torch_available()
+    if torch is None:
+        return _run_heuristic_fallback(
+            settings=settings,
+            timestamp=timestamp,
+            model_version=model_version,
+            x=x,
+            output_path=output_path,
+            uncertainty_path=uncertainty_path,
+        )
     summary_path = _resolve_summary_path(settings, model_version=model_version)
     bundle = _load_bundle(str(summary_path.resolve()))
     if x.shape[0] != bundle.norm_mean.shape[0]:

@@ -123,6 +123,21 @@ class DatasetService:
             return p
         return None
 
+    def _read_channel_names(self, sample: SampleRecord | None) -> set[str]:
+        if sample is None:
+            return set()
+        meta_path = sample.folder / "meta.json"
+        if not meta_path.exists():
+            return set()
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            return set()
+        names = meta.get("channel_names")
+        if not isinstance(names, list):
+            return set()
+        return {str(v) for v in names}
+
     def list_layers(self, timestamp: str) -> list[dict[str, Any]]:
         normalized = normalize_timestamp(timestamp)
         sample = self._scan_samples().get(normalized)
@@ -130,11 +145,16 @@ class DatasetService:
         local_heatmap = self._find_local_heatmap(normalized)
         pred_file = self.settings.pred_root / "unet_v1" / f"{normalized}.npy"
         unc_file = self.settings.pred_root / "unet_v1" / f"{normalized}_uncertainty.npy"
+        channel_names = self._read_channel_names(sample)
         legacy_bathy_exists = False
         if legacy and legacy.get("x_bathy"):
             legacy_bathy_exists = Path(str(legacy["x_bathy"])).exists()
 
         has_bathy = bool(sample and ("x_bathy.npy" in sample.files or "blocked_mask.npy" in sample.files or "x_stack.npy" in sample.files))
+        can_infer_unet = bool(sample and "x_stack.npy" in sample.files)
+        has_ice_channel = "ice_conc" in channel_names
+        has_wave_channel = "wave_hs" in channel_names
+        has_wind_channel = "wind_u10" in channel_names and "wind_v10" in channel_names
         return [
             {
                 "id": "bathy",
@@ -152,31 +172,31 @@ class DatasetService:
             {
                 "id": "unet_pred",
                 "name": "U-Net Prediction",
-                "available": pred_file.exists(),
+                "available": pred_file.exists() or can_infer_unet,
                 "unit": "class",
             },
             {
                 "id": "unet_uncertainty",
                 "name": "U-Net Uncertainty",
-                "available": unc_file.exists(),
+                "available": unc_file.exists() or can_infer_unet,
                 "unit": "entropy",
             },
             {
                 "id": "ice",
                 "name": "Ice Concentration",
-                "available": self._layer_available_from_raw("ice", normalized),
+                "available": has_ice_channel or self._layer_available_from_raw("ice", normalized),
                 "unit": "%",
             },
             {
                 "id": "wave",
                 "name": "Wave Height",
-                "available": self._layer_available_from_raw("wave", normalized),
+                "available": has_wave_channel or self._layer_available_from_raw("wave", normalized),
                 "unit": "m",
             },
             {
                 "id": "wind",
                 "name": "Wind 10m",
-                "available": self._layer_available_from_raw("wind", normalized),
+                "available": has_wind_channel or self._layer_available_from_raw("wind", normalized),
                 "unit": "m/s",
             },
         ]
