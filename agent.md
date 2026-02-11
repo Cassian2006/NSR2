@@ -419,3 +419,4 @@ pm run build in frontend (pass).
 - 2026-02-11T09:43:43.3889545Z | Added tests backend/tests/test_dataset_layers_availability.py and expanded backend/tests/test_model_infer_runtime.py for no-torch heuristic fallback.
 - 2026-02-11T09:43:43.3889545Z | Updated DEPLOY_RENDER.md troubleshooting section for missing layers/unet on Render with sample_count and NSR_DATA_ROOT/NSR_OUTPUTS_ROOT checks.
 - 2026-02-11T09:43:43.3889545Z | Validation: python -m pytest -q in backend -> 62 passed; npm run build in frontend succeeded.
+- 2026-02-11T09:44:17.6859261Z | Created commit 39a071b (render layer visibility fix + no-torch unet fallback) and pushed to origin/main.
