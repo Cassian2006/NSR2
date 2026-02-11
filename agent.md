@@ -412,3 +412,4 @@ pm run build in frontend (pass).
 - 2026-02-11T00:42:02.6515869Z | UI optimization: improved map interaction performance in frontend/src/components/MapCanvas.tsx using requestAnimationFrame-throttled mouse position updates and Leaflet preferCanvas rendering.
 - 2026-02-11T00:42:02.6515869Z | Validation: npm run build in frontend succeeded after UI updates.
 - 2026-02-11T08:29:51.0953396Z | Pre-submit validation before GitHub submit: python -m pytest -q in backend -> 60 passed; npm run build in frontend succeeded.
+- 2026-02-11T08:30:19.8734105Z | Created commit 0cf6acf (latest pipeline hardening + D* dynamic optimization + frontend UI polish) and pushed to origin/main.
