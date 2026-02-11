@@ -29,6 +29,7 @@ interface MapCanvasProps {
   showRoute: boolean;
   routeGeojson?: {
     geometry?: { coordinates?: [number, number][] };
+    properties?: Record<string, unknown> & { display_coordinates?: [number, number][] };
   };
   start?: { lat: number; lon: number };
   goal?: { lat: number; lon: number };
@@ -123,7 +124,8 @@ export default function MapCanvas({ timestamp, layers, showRoute, routeGeojson, 
   };
 
   const routeLatLng = useMemo(() => {
-    const coords = routeGeojson?.geometry?.coordinates ?? [];
+    const displayCoords = routeGeojson?.properties?.display_coordinates;
+    const coords = displayCoords && displayCoords.length >= 2 ? displayCoords : routeGeojson?.geometry?.coordinates ?? [];
     return coords.map(([lon, lat]) => [lat, lon] as [number, number]);
   }, [routeGeojson]);
 

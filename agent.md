@@ -420,3 +420,12 @@ pm run build in frontend (pass).
 - 2026-02-11T09:43:43.3889545Z | Updated DEPLOY_RENDER.md troubleshooting section for missing layers/unet on Render with sample_count and NSR_DATA_ROOT/NSR_OUTPUTS_ROOT checks.
 - 2026-02-11T09:43:43.3889545Z | Validation: python -m pytest -q in backend -> 62 passed; npm run build in frontend succeeded.
 - 2026-02-11T09:44:17.6859261Z | Created commit 39a071b (render layer visibility fix + no-torch unet fallback) and pushed to origin/main.
+- 2026-02-11T09:50:04.8018709Z | Started local backend and frontend dev servers in separate PowerShell windows (backend: 127.0.0.1:8000, frontend: 127.0.0.1:5173); health checks passed.
+- 2026-02-11T09:50:04.8018709Z | Attempted to auto-open local frontend URL from agent shell, but GUI open commands were blocked by execution policy in this environment.
+- 2026-02-11T09:51:49.6446697Z | Diagnosed local layer-missing issue: frontend/.env.local pointed VITE_API_BASE_URL to http://127.0.0.1:8001/v1 while backend runs on 8000; updated to 8000 and restarted frontend dev server.
+- 2026-02-11T09:51:49.6446697Z | Verified local endpoints after fix: frontend http://127.0.0.1:5173 reachable; backend /v1/layers for 2024-07-01-00:00 returns all key layers available=true.
+- 2026-02-11T10:07:20.2019221Z | Routing quality fix: backend/app/planning/router.py now computes caution/adjacent-blocked metrics via line-segment raster traversal (_trace_line_cells + _collect_path_metrics), avoiding undercount after LOS smoothing.
+- 2026-02-11T10:07:20.2019221Z | Routing behavior tuning: strengthened tie-breaker/budget/minimize penalties and added near-blocked soft penalty in transition cost; propagated into A*, static D* Lite, and incremental D* Lite dynamic replanning.
+- 2026-02-11T10:07:20.2019221Z | Visual route realism: added display-only Chaikin smoothed polyline (route_geojson.properties.display_coordinates) and frontend rendering support in frontend/src/components/MapCanvas.tsx.
+- 2026-02-11T10:07:20.2019221Z | Validation: PYTHONPATH=backend pytest -q backend/tests/test_router_smoothing.py backend/tests/test_planning_dstar_incremental.py -> 7 passed; PYTHONPATH=backend pytest -q backend/tests/test_api_smoke.py -> 20 passed; npm run build in frontend succeeded.
+- 2026-02-11T10:07:20.2019221Z | Quick runtime check: plan_grid_route on local timestamp 2024-07-01_00 produced non-zero caution metrics (caution_len_km=178.672, caution_cell_ratio=0.0249), confirming segment-level caution accounting works.

@@ -53,6 +53,7 @@ class GridState:
     caution: np.ndarray
     ais_norm: np.ndarray
     free_cells: np.ndarray
+    near_blocked: np.ndarray | None = None
 
 
 def _neighbors(r: int, c: int, h: int, w: int):
@@ -152,6 +153,56 @@ def _smooth_cells_los(cells: list[tuple[int, int]], blocked: np.ndarray) -> list
     return out
 
 
+def _trace_line_cells(a: tuple[int, int], b: tuple[int, int], shape: tuple[int, int]) -> list[tuple[int, int]]:
+    """Bresenham trace of all grid cells touched from a to b (inclusive endpoints)."""
+    r0, c0 = a
+    r1, c1 = b
+    dr = abs(r1 - r0)
+    dc = abs(c1 - c0)
+    sr = 1 if r0 < r1 else -1
+    sc = 1 if c0 < c1 else -1
+    err = dr - dc
+    h, w = shape
+
+    out: list[tuple[int, int]] = []
+    r, c = r0, c0
+    while True:
+        if 0 <= r < h and 0 <= c < w:
+            cell = (r, c)
+            if not out or out[-1] != cell:
+                out.append(cell)
+        if r == r1 and c == c1:
+            break
+        e2 = 2 * err
+        if e2 > -dc:
+            err -= dc
+            r += sr
+        if e2 < dr:
+            err += dr
+            c += sc
+    return out
+
+
+def _build_near_blocked_mask(blocked: np.ndarray) -> np.ndarray:
+    near = np.zeros_like(blocked, dtype=bool)
+    for dr in (-1, 0, 1):
+        for dc in (-1, 0, 1):
+            if dr == 0 and dc == 0:
+                continue
+            shifted = np.roll(blocked, shift=(dr, dc), axis=(0, 1))
+            if dr > 0:
+                shifted[:dr, :] = False
+            elif dr < 0:
+                shifted[dr:, :] = False
+            if dc > 0:
+                shifted[:, :dc] = False
+            elif dc < 0:
+                shifted[:, dc:] = False
+            near |= shifted
+    near &= ~blocked
+    return near
+
+
 def _load_ais_heatmap(settings: Settings, timestamp: str, shape: tuple[int, int]) -> np.ndarray:
     root = settings.ais_heatmap_root
     if root.exists():
@@ -163,21 +214,25 @@ def _load_ais_heatmap(settings: Settings, timestamp: str, shape: tuple[int, int]
     return np.zeros(shape, dtype=np.float32)
 
 
-def _policy_scalars(caution_mode: str, corridor_bias: float) -> tuple[float, float]:
+def _policy_scalars(caution_mode: str, corridor_bias: float) -> tuple[float, float, float]:
     if caution_mode == "tie_breaker":
-        caution_penalty = 0.12
-        corridor_reward_scale = 0.15
+        caution_penalty = 0.22
+        corridor_reward_scale = 0.10
+        near_blocked_penalty = 0.06
     elif caution_mode == "budget":
-        caution_penalty = 0.24
-        corridor_reward_scale = 0.08
+        caution_penalty = 0.35
+        corridor_reward_scale = 0.06
+        near_blocked_penalty = 0.08
     elif caution_mode == "minimize":
-        caution_penalty = 0.45
-        corridor_reward_scale = 0.04
+        caution_penalty = 0.55
+        corridor_reward_scale = 0.03
+        near_blocked_penalty = 0.10
     else:  # strict
         caution_penalty = 0.0
         corridor_reward_scale = 0.0
+        near_blocked_penalty = 0.0
     corridor_reward = max(0.0, float(corridor_bias)) * corridor_reward_scale
-    return caution_penalty, corridor_reward
+    return caution_penalty, corridor_reward, near_blocked_penalty
 
 
 def _grid_resolution_km(bounds: GridBounds, h: int, w: int) -> tuple[float, float]:
@@ -247,6 +302,7 @@ def _load_grid_state(
         caution=caution,
         ais_norm=ais_norm,
         free_cells=free_cells,
+        near_blocked=_build_near_blocked_mask(blocked),
     )
 
 
@@ -259,6 +315,8 @@ def _transition_cost(
     ais_norm: np.ndarray,
     caution_penalty: float,
     corridor_reward: float,
+    near_blocked: np.ndarray | None = None,
+    near_blocked_penalty: float = 0.0,
 ) -> float:
     fr, fc = from_rc
     tr, tc = to_rc
@@ -268,9 +326,108 @@ def _transition_cost(
     mult = 1.0
     if caution[tr, tc]:
         mult += caution_penalty
+    elif near_blocked is not None and near_blocked[tr, tc]:
+        mult += near_blocked_penalty
     mult -= corridor_reward * float(ais_norm[tr, tc])
     mult = max(0.15, mult)
     return step_km * mult
+
+
+def _collect_path_metrics(
+    *,
+    cells: list[tuple[int, int]],
+    geo,
+    caution: np.ndarray,
+    ais_norm: np.ndarray,
+    near_blocked: np.ndarray,
+    caution_penalty: float,
+    corridor_reward: float,
+) -> dict:
+    if len(cells) < 2:
+        return {
+            "distance_km": 0.0,
+            "base_distance_km": 0.0,
+            "caution_len_km": 0.0,
+            "cost_caution_extra_km": 0.0,
+            "cost_corridor_discount_km": 0.0,
+            "caution_hits": 0,
+            "near_blocked_hits": 0,
+            "sample_count": 0,
+            "corridor_vals": [],
+        }
+
+    h, w = caution.shape
+    total_distance_km = 0.0
+    caution_len_km = 0.0
+    cost_caution_extra_km = 0.0
+    cost_corridor_discount_km = 0.0
+    caution_hits = 0
+    near_blocked_hits = 0
+    sample_count = 0
+    corridor_vals: list[float] = []
+
+    for idx in range(1, len(cells)):
+        pr, pc = cells[idx - 1]
+        cr, cc = cells[idx]
+        plat, plon = geo.rc_to_latlon(pr, pc)
+        clat, clon = geo.rc_to_latlon(cr, cc)
+        segment_km = haversine_km(plat, plon, clat, clon)
+        total_distance_km += segment_km
+
+        traced = _trace_line_cells((pr, pc), (cr, cc), (h, w))
+        sampled = traced[1:] if len(traced) > 1 else traced
+        if not sampled:
+            continue
+
+        caution_seg_hits = 0
+        near_blocked_seg_hits = 0
+        corridor_seg_vals: list[float] = []
+        for rr, rc in sampled:
+            caution_seg_hits += int(bool(caution[rr, rc]))
+            near_blocked_seg_hits += int(bool(near_blocked[rr, rc]))
+            corridor_seg_vals.append(float(ais_norm[rr, rc]))
+
+        seg_samples = len(sampled)
+        sample_count += seg_samples
+        caution_hits += caution_seg_hits
+        near_blocked_hits += near_blocked_seg_hits
+        corridor_vals.extend(corridor_seg_vals)
+
+        caution_ratio = float(caution_seg_hits / max(1, seg_samples))
+        corridor_mean = float(np.mean(corridor_seg_vals) if corridor_seg_vals else 0.0)
+
+        caution_len_km += segment_km * caution_ratio
+        cost_caution_extra_km += segment_km * caution_penalty * caution_ratio
+        cost_corridor_discount_km += segment_km * corridor_reward * corridor_mean
+
+    return {
+        "distance_km": total_distance_km,
+        "base_distance_km": total_distance_km,
+        "caution_len_km": caution_len_km,
+        "cost_caution_extra_km": cost_caution_extra_km,
+        "cost_corridor_discount_km": cost_corridor_discount_km,
+        "caution_hits": caution_hits,
+        "near_blocked_hits": near_blocked_hits,
+        "sample_count": sample_count,
+        "corridor_vals": corridor_vals,
+    }
+
+
+def _build_display_coordinates(coords: list[list[float]], iterations: int = 2) -> list[list[float]]:
+    """Chaikin smoothing for display only; does not affect planning metrics."""
+    if len(coords) < 3:
+        return coords
+    points = np.asarray(coords, dtype=np.float64)
+    for _ in range(max(1, iterations)):
+        new_points = [points[0]]
+        for idx in range(len(points) - 1):
+            p = points[idx]
+            q = points[idx + 1]
+            new_points.append(0.75 * p + 0.25 * q)
+            new_points.append(0.25 * p + 0.75 * q)
+        new_points.append(points[-1])
+        points = np.vstack(new_points)
+    return [[float(p[0]), float(p[1])] for p in points]
 
 
 def _adjacent_blocked_ratio(cells: list[tuple[int, int]], blocked: np.ndarray) -> float:
@@ -308,6 +465,8 @@ def _run_astar(
     km_per_col_min: float,
     caution_penalty: float,
     corridor_reward: float,
+    near_blocked: np.ndarray | None = None,
+    near_blocked_penalty: float = 0.0,
 ) -> list[tuple[int, int]]:
     h, w = blocked.shape
     gscore = np.full((h, w), np.inf, dtype=np.float64)
@@ -347,6 +506,8 @@ def _run_astar(
                 ais_norm=ais_norm,
                 caution_penalty=caution_penalty,
                 corridor_reward=corridor_reward,
+                near_blocked=near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
             )
             if cand < gscore[rr, cc]:
                 gscore[rr, cc] = cand
@@ -369,6 +530,8 @@ def _run_dstar_lite_static(
     goal: tuple[int, int],
     caution_penalty: float,
     corridor_reward: float,
+    near_blocked: np.ndarray | None = None,
+    near_blocked_penalty: float = 0.0,
 ) -> list[tuple[int, int]]:
     """Static-grid backward potential field + greedy extraction."""
     g_to_goal = _compute_cost_to_goal(
@@ -379,6 +542,8 @@ def _run_dstar_lite_static(
         goal=goal,
         caution_penalty=caution_penalty,
         corridor_reward=corridor_reward,
+        near_blocked=near_blocked,
+        near_blocked_penalty=near_blocked_penalty,
     )
     h, w = blocked.shape
     gr, gc = goal
@@ -411,6 +576,8 @@ def _run_dstar_lite_static(
                 ais_norm=ais_norm,
                 caution_penalty=caution_penalty,
                 corridor_reward=corridor_reward,
+                near_blocked=near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
             ) + tail
             if cand < best_cost:
                 best_cost = cand
@@ -436,6 +603,8 @@ def _compute_cost_to_goal(
     goal: tuple[int, int],
     caution_penalty: float,
     corridor_reward: float,
+    near_blocked: np.ndarray | None = None,
+    near_blocked_penalty: float = 0.0,
 ) -> np.ndarray:
     h, w = blocked.shape
     gr, gc = goal
@@ -460,6 +629,8 @@ def _compute_cost_to_goal(
                 ais_norm=ais_norm,
                 caution_penalty=caution_penalty,
                 corridor_reward=corridor_reward,
+                near_blocked=near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
             )
             if cand < g_to_goal[pr, pc]:
                 g_to_goal[pr, pc] = cand
@@ -483,6 +654,8 @@ class _DStarLiteIncremental:
         km_per_col_min: float,
         caution_penalty: float,
         corridor_reward: float,
+        near_blocked: np.ndarray | None = None,
+        near_blocked_penalty: float = 0.0,
     ) -> None:
         self.geo = geo
         self.blocked = blocked.copy()
@@ -496,6 +669,8 @@ class _DStarLiteIncremental:
         self.km_per_col_min = km_per_col_min
         self.caution_penalty = caution_penalty
         self.corridor_reward = corridor_reward
+        self.near_blocked = near_blocked.copy() if near_blocked is not None else _build_near_blocked_mask(self.blocked)
+        self.near_blocked_penalty = near_blocked_penalty
 
         h, w = blocked.shape
         self.h = h
@@ -508,6 +683,8 @@ class _DStarLiteIncremental:
             goal=self.goal,
             caution_penalty=self.caution_penalty,
             corridor_reward=self.corridor_reward,
+            near_blocked=self.near_blocked,
+            near_blocked_penalty=self.near_blocked_penalty,
         )
         self.g = g_to_goal.copy()
         self.rhs = g_to_goal.copy()
@@ -576,6 +753,8 @@ class _DStarLiteIncremental:
             ais_norm=self.ais_norm,
             caution_penalty=self.caution_penalty,
             corridor_reward=self.corridor_reward,
+            near_blocked=self.near_blocked,
+            near_blocked_penalty=self.near_blocked_penalty,
         )
 
     def _update_vertex(self, u: tuple[int, int]) -> None:
@@ -644,6 +823,7 @@ class _DStarLiteIncremental:
         if changed_cells.size == 0:
             return
         np.copyto(self.blocked, new_blocked)
+        self.near_blocked = _build_near_blocked_mask(self.blocked)
         touched: set[tuple[int, int]] = set()
         for rc in changed_cells:
             r = int(rc[0])
@@ -747,7 +927,7 @@ def plan_grid_route_dynamic(
     if planner_key not in {"astar", "a_star", "dstar_lite", "dstar-lite", "dstar"}:
         raise PlanningError(f"Unsupported planner={planner}, expected astar or dstar_lite")
 
-    caution_penalty, corridor_reward = _policy_scalars(caution_mode, corridor_bias)
+    caution_penalty, corridor_reward, near_blocked_penalty = _policy_scalars(caution_mode, corridor_bias)
     km_per_row, km_per_col_min = _grid_resolution_km(states[0].bounds, h, w)
 
     sr0, sc0, s_inside = states[0].geo.latlon_to_rc(start[0], start[1])
@@ -818,6 +998,8 @@ def plan_grid_route_dynamic(
                 km_per_col_min=km_per_col_min,
                 caution_penalty=caution_penalty,
                 corridor_reward=corridor_reward,
+                near_blocked=state.near_blocked,
+                near_blocked_penalty=near_blocked_penalty,
             )
         else:
             if dstar is None:
@@ -832,6 +1014,8 @@ def plan_grid_route_dynamic(
                     km_per_col_min=km_per_col_min,
                     caution_penalty=caution_penalty,
                     corridor_reward=corridor_reward,
+                    near_blocked=state.near_blocked,
+                    near_blocked_penalty=near_blocked_penalty,
                 )
                 step_update_mode = "rebuild"
             else:
@@ -855,6 +1039,8 @@ def plan_grid_route_dynamic(
                         km_per_col_min=km_per_col_min,
                         caution_penalty=caution_penalty,
                         corridor_reward=corridor_reward,
+                        near_blocked=state.near_blocked,
+                        near_blocked_penalty=near_blocked_penalty,
                     )
                     step_update_mode = "rebuild"
                     dynamic_notes.append(
@@ -872,6 +1058,8 @@ def plan_grid_route_dynamic(
                         km_per_col_min=km_per_col_min,
                         caution_penalty=caution_penalty,
                         corridor_reward=corridor_reward,
+                        near_blocked=state.near_blocked,
+                        near_blocked_penalty=near_blocked_penalty,
                     )
                     step_update_mode = "rebuild"
                 if dstar.start != current_start:
@@ -891,30 +1079,40 @@ def plan_grid_route_dynamic(
         step_caution_km = 0.0
         step_caution_extra_km = 0.0
         step_corridor_discount_km = 0.0
+        step_samples = 0
+        step_caution_hits = 0
+        step_near_blocked_hits = 0
+        metric_cells = move_cells[: move_edges + 1]
+        near_blocked = state.near_blocked if state.near_blocked is not None else _build_near_blocked_mask(state.blocked)
+        step_metrics = _collect_path_metrics(
+            cells=metric_cells,
+            geo=state.geo,
+            caution=state.caution,
+            ais_norm=state.ais_norm,
+            near_blocked=near_blocked,
+            caution_penalty=caution_penalty,
+            corridor_reward=corridor_reward,
+        )
+        step_distance_km = float(step_metrics["distance_km"])
+        step_caution_km = float(step_metrics["caution_len_km"])
+        step_caution_extra_km = float(step_metrics["cost_caution_extra_km"])
+        step_corridor_discount_km = float(step_metrics["cost_corridor_discount_km"])
+        step_samples = int(step_metrics["sample_count"])
+        step_caution_hits = int(step_metrics["caution_hits"])
+        step_near_blocked_hits = int(step_metrics["near_blocked_hits"])
+        corridor_vals.extend(step_metrics["corridor_vals"])
         for idx in range(1, move_edges + 1):
             pr, pc = move_cells[idx - 1]
             cr, cc = move_cells[idx]
             plat, plon = state.geo.rc_to_latlon(pr, pc)
             clat, clon = state.geo.rc_to_latlon(cr, cc)
-            step = haversine_km(plat, plon, clat, clon)
-            step_distance_km += step
-            if state.caution[cr, cc]:
-                step_caution_km += step
-                step_caution_extra_km += step * caution_penalty
-                executed_caution_points += 1
-            executed_points += 1
-            near_blocked = False
-            for nr, nc in _neighbors(cr, cc, h, w):
-                if state.blocked[nr, nc]:
-                    near_blocked = True
-                    break
-            if near_blocked:
-                executed_adjacent_blocked_points += 1
-            step_corridor_discount_km += step * corridor_reward * float(state.ais_norm[cr, cc])
-            corridor_vals.append(float(state.ais_norm[cr, cc]))
             if not executed_coords:
                 executed_coords.append([plon, plat])
             executed_coords.append([clon, clat])
+
+        executed_points += step_samples
+        executed_caution_points += step_caution_hits
+        executed_adjacent_blocked_points += step_near_blocked_hits
 
         total_distance_km += step_distance_km
         base_distance_km += step_distance_km
@@ -957,6 +1155,7 @@ def plan_grid_route_dynamic(
         "caution_mode": caution_mode,
         "effective_caution_penalty": round(float(caution_penalty), 4),
         "effective_corridor_reward": round(float(corridor_reward), 4),
+        "effective_near_blocked_penalty": round(float(near_blocked_penalty), 4),
         "route_cost_base_km": round(float(base_distance_km), 3),
         "route_cost_caution_extra_km": round(float(cost_caution_extra_km), 3),
         "route_cost_corridor_discount_km": round(float(cost_corridor_discount_km), 3),
@@ -986,10 +1185,11 @@ def plan_grid_route_dynamic(
         "replan_changed_cells_total": int(sum(int(r.get("changed_blocked_cells", 0)) for r in replans)),
     }
 
+    display_coords = _build_display_coordinates(executed_coords)
     route_geojson = {
         "type": "Feature",
         "geometry": {"type": "LineString", "coordinates": executed_coords},
-        "properties": explain,
+        "properties": {**explain, "display_coordinates": display_coords},
     }
     return PlanResult(route_geojson=route_geojson, explain=explain)
 
@@ -1068,23 +1268,9 @@ def plan_grid_route(
     s_rc_adj = _nearest_unblocked(s_rc, blocked, free_cells)
     g_rc_adj = _nearest_unblocked(g_rc, blocked, free_cells)
 
-    lat_step = (bounds.lat_max - bounds.lat_min) / max(1, h - 1)
-    lon_step = (bounds.lon_max - bounds.lon_min) / max(1, w - 1)
-    km_per_row = 111.32 * lat_step
-    km_per_col_min = 111.32 * max(0.05, math.cos(math.radians(bounds.lat_max))) * lon_step
-    if caution_mode == "tie_breaker":
-        caution_penalty = 0.12
-        corridor_reward_scale = 0.15
-    elif caution_mode == "budget":
-        caution_penalty = 0.24
-        corridor_reward_scale = 0.08
-    elif caution_mode == "minimize":
-        caution_penalty = 0.45
-        corridor_reward_scale = 0.04
-    else:  # strict
-        caution_penalty = 0.0
-        corridor_reward_scale = 0.0
-    corridor_reward = max(0.0, float(corridor_bias)) * corridor_reward_scale
+    km_per_row, km_per_col_min = _grid_resolution_km(bounds, h, w)
+    caution_penalty, corridor_reward, near_blocked_penalty = _policy_scalars(caution_mode, corridor_bias)
+    near_blocked = _build_near_blocked_mask(blocked)
 
     sr, sc = s_rc_adj
     gr, gc = g_rc_adj
@@ -1101,6 +1287,8 @@ def plan_grid_route(
             km_per_col_min=km_per_col_min,
             caution_penalty=caution_penalty,
             corridor_reward=corridor_reward,
+            near_blocked=near_blocked,
+            near_blocked_penalty=near_blocked_penalty,
         )
     elif planner_key in {"dstar_lite", "dstar-lite", "dstar"}:
         cells = _run_dstar_lite_static(
@@ -1112,6 +1300,8 @@ def plan_grid_route(
             goal=(gr, gc),
             caution_penalty=caution_penalty,
             corridor_reward=corridor_reward,
+            near_blocked=near_blocked,
+            near_blocked_penalty=near_blocked_penalty,
         )
     else:
         raise PlanningError(f"Unsupported planner={planner}, expected astar or dstar_lite")
@@ -1121,27 +1311,27 @@ def plan_grid_route(
         cells = _smooth_cells_los(cells, blocked)
 
     coords: list[list[float]] = []
-    raw_distance_km = 0.0
-    caution_len_km = 0.0
-    base_distance_km = 0.0
-    cost_caution_extra_km = 0.0
-    cost_corridor_discount_km = 0.0
-    corridor_vals: list[float] = []
-    prev_lat = None
-    prev_lon = None
-    for idx, (r, c) in enumerate(cells):
+    for r, c in cells:
         lat, lon = geo.rc_to_latlon(r, c)
         coords.append([lon, lat])
-        corridor_vals.append(float(ais_norm[r, c]))
-        if idx > 0 and prev_lat is not None and prev_lon is not None:
-            step = haversine_km(prev_lat, prev_lon, lat, lon)
-            raw_distance_km += step
-            base_distance_km += step
-            if caution[r, c]:
-                caution_len_km += step
-                cost_caution_extra_km += step * caution_penalty
-            cost_corridor_discount_km += step * corridor_reward * float(ais_norm[r, c])
-        prev_lat, prev_lon = lat, lon
+    metrics = _collect_path_metrics(
+        cells=cells,
+        geo=geo,
+        caution=caution,
+        ais_norm=ais_norm,
+        near_blocked=near_blocked,
+        caution_penalty=caution_penalty,
+        corridor_reward=corridor_reward,
+    )
+    raw_distance_km = float(metrics["distance_km"])
+    base_distance_km = float(metrics["base_distance_km"])
+    caution_len_km = float(metrics["caution_len_km"])
+    cost_caution_extra_km = float(metrics["cost_caution_extra_km"])
+    cost_corridor_discount_km = float(metrics["cost_corridor_discount_km"])
+    corridor_vals = list(metrics["corridor_vals"])
+    caution_hits = int(metrics["caution_hits"])
+    near_blocked_hits = int(metrics["near_blocked_hits"])
+    sample_count = int(metrics["sample_count"])
 
     s_lat0, s_lon0 = geo.rc_to_latlon(*s_rc)
     s_lat1, s_lon1 = geo.rc_to_latlon(*s_rc_adj)
@@ -1160,6 +1350,7 @@ def plan_grid_route(
         "caution_mode": caution_mode,
         "effective_caution_penalty": round(float(caution_penalty), 4),
         "effective_corridor_reward": round(float(corridor_reward), 4),
+        "effective_near_blocked_penalty": round(float(near_blocked_penalty), 4),
         "route_cost_base_km": round(float(base_distance_km), 3),
         "route_cost_caution_extra_km": round(float(cost_caution_extra_km), 3),
         "route_cost_corridor_discount_km": round(float(cost_corridor_discount_km), 3),
@@ -1172,8 +1363,8 @@ def plan_grid_route(
         "start_adjust_km": round(float(start_adjust_km), 3),
         "goal_adjust_km": round(float(goal_adjust_km), 3),
         "blocked_ratio": round(float(blocked.mean()), 4),
-        "adjacent_blocked_ratio": round(float(_adjacent_blocked_ratio(cells, blocked)), 4),
-        "caution_cell_ratio": round(float(_caution_cell_ratio(cells, caution)), 4),
+        "adjacent_blocked_ratio": round(float(near_blocked_hits / max(1, sample_count)), 4),
+        "caution_cell_ratio": round(float(caution_hits / max(1, sample_count)), 4),
         "planner": planner_key,
         "grid_bounds": {
             "lat_min": bounds.lat_min,
@@ -1183,9 +1374,10 @@ def plan_grid_route(
         },
     }
 
+    display_coords = _build_display_coordinates(coords)
     route_geojson = {
         "type": "Feature",
         "geometry": {"type": "LineString", "coordinates": coords},
-        "properties": explain,
+        "properties": {**explain, "display_coordinates": display_coords},
     }
     return PlanResult(route_geojson=route_geojson, explain=explain)
