@@ -443,3 +443,10 @@ pm run build in frontend (pass).
 - 2026-02-11T11:09:34+00:00 | Mobile map rendering fix: updated frontend/src/pages/MapWorkspace.tsx layout chain for mobile (viewport-safe page height, explicit map pane height, mobile-first pane order) and removed fragile h-full root dependency.
 - 2026-02-11T11:09:34+00:00 | Added frontend/src/components/MapCanvas.tsx MapResizeGuard using Leaflet invalidateSize on resize/orientation/layout changes to prevent mobile blank-map after container resize.
 - 2026-02-11T11:09:34+00:00 | Pre-submit validation: npm run build in frontend (pass); python -m pytest -q in backend -> 67 passed.
+- 2026-02-11T11:43:28+00:00 | Added Render free-tier demo dataset under backend/demo_data (4 timestamps across 2024-07..2024-10) including annotation_pack x_stack/blocked/meta and ais_heatmap tiles.
+- 2026-02-11T11:43:28+00:00 | Updated Dockerfile defaults to use built-in demo paths: NSR_DATA_ROOT=/app/backend/demo_data and NSR_OUTPUTS_ROOT=/app/backend/demo_outputs.
+- 2026-02-11T11:43:28+00:00 | Fixed settings path derivation in backend/app/core/config.py so NSR_DATA_ROOT/NSR_OUTPUTS_ROOT correctly propagate to annotation_pack_root/ais_heatmap_root/pred/gallery/latest paths unless explicitly overridden.
+- 2026-02-11T11:43:28+00:00 | Added regression test backend/tests/test_config_paths.py for data-root override propagation.
+- 2026-02-11T11:43:28+00:00 | Updated DEPLOY_RENDER.md with built-in demo data behavior and troubleshooting guidance (sample_count=4 indicates demo mode).
+- 2026-02-11T11:43:28+00:00 | Validation: python -m pytest -q in backend -> 68 passed; npm run build in frontend succeeded.
+

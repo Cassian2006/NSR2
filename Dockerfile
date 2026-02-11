@@ -10,6 +10,8 @@ RUN npm run build
 FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV NSR_DATA_ROOT=/app/backend/demo_data
+ENV NSR_OUTPUTS_ROOT=/app/backend/demo_outputs
 
 WORKDIR /app
 COPY backend/requirements.txt /app/backend/requirements.txt

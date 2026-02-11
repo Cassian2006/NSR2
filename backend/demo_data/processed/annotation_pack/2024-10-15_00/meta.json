@@ -1,0 +1,24 @@
+{
+  "timestamp": "2024-10-15_00",
+  "x_stack": "x_stack.npy",
+  "blocked_mask": "blocked_mask.npy",
+  "caution_mask": "caution_mask.npy",
+  "channel_names": [
+    "ice_conc",
+    "ice_thick",
+    "wave_hs",
+    "wind_u10",
+    "wind_v10",
+    "bathy",
+    "ais_heatmap"
+  ],
+  "shape": [
+    241,
+    1921
+  ],
+  "blocked_rule": {
+    "type": "bathy_gte_or_nan",
+    "threshold": 0.0
+  },
+  "has_bathy": true
+}

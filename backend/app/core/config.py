@@ -69,6 +69,33 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     settings = Settings()
+    provided = set(settings.model_fields_set)
+
+    # Keep derived paths synced with data_root / outputs_root unless explicitly overridden.
+    if "processed_samples_root" not in provided:
+        settings.processed_samples_root = settings.data_root / "processed" / "samples"
+    if "annotation_pack_root" not in provided:
+        settings.annotation_pack_root = settings.data_root / "processed" / "annotation_pack"
+    if "env_grids_root" not in provided:
+        settings.env_grids_root = settings.data_root / "interim" / "env_grids"
+    if "dataset_index_path" not in provided:
+        settings.dataset_index_path = settings.data_root / "processed" / "dataset" / "index.json"
+    if "ais_heatmap_root" not in provided:
+        settings.ais_heatmap_root = settings.data_root / "ais_heatmap"
+
+    if "gallery_root" not in provided:
+        settings.gallery_root = settings.outputs_root / "gallery"
+    if "pred_root" not in provided:
+        settings.pred_root = settings.outputs_root / "pred"
+    if "latest_root" not in provided:
+        settings.latest_root = settings.outputs_root / "latest"
+    if "latest_progress_store_path" not in provided:
+        settings.latest_progress_store_path = settings.latest_root / "progress_state.json"
+    if "latest_source_health_path" not in provided:
+        settings.latest_source_health_path = settings.latest_root / "source_health.json"
+    if "unet_default_summary" not in provided:
+        settings.unet_default_summary = settings.outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
+
     settings.outputs_root.mkdir(parents=True, exist_ok=True)
     settings.latest_root.mkdir(parents=True, exist_ok=True)
     settings.gallery_root.mkdir(parents=True, exist_ok=True)

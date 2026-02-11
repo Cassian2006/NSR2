@@ -17,6 +17,13 @@ This repo now supports deploying frontend + backend together as one Docker web s
 No `Build Command` or `Start Command` needed; Dockerfile handles both.
 
 ## 3. Environment Variables
+Defaults in Docker image:
+
+- `NSR_DATA_ROOT=/app/backend/demo_data`
+- `NSR_OUTPUTS_ROOT=/app/backend/demo_outputs`
+
+This means a small built-in demo dataset is available even on free Render without disks.
+
 Optional for same-domain deployment:
 - `NSR_CORS_ORIGIN_REGEX=^https://.*\.onrender\.com$`
 
@@ -39,16 +46,17 @@ For `latest` live Copernicus pull, set:
   - `NSR_LATEST_SNAPSHOT_URL_TEMPLATE` / `NSR_LATEST_SNAPSHOT_TOKEN` (fallback NPZ source)
 
 ## 4. Data Notes
-- The Docker context excludes `data/` and `outputs/` via `.dockerignore`.
-- Without mounted/provisioned dataset, API can start but map/planning data will be missing.
-- If you have external data storage, set:
+- The Docker context excludes root `data/` and `outputs/` via `.dockerignore`.
+- The image includes `backend/demo_data` as a demo subset (limited timestamps).
+- For full dataset deployment, set:
   - `NSR_DATA_ROOT`
   - `NSR_OUTPUTS_ROOT`
 
 ### Render Layer Missing Troubleshooting
 If base map appears but overlay layers are empty or `U-Net` shows as missing:
 1. Open `GET /v1/datasets` and check `sample_count`:
-   - `0` means your container has no dataset mounted.
+   - `0` means your runtime dataset path is empty/unreachable.
+   - `8` means you are using the built-in demo pack.
 2. Ensure `NSR_DATA_ROOT` points to a mounted disk path that contains:
    - `processed/annotation_pack/<timestamp>/x_stack.npy`
    - `processed/annotation_pack/<timestamp>/blocked_mask.npy`
