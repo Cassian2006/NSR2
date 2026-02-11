@@ -472,3 +472,4 @@ pm run build in frontend (pass).
 - 2026-02-11T14:55:32Z | Validation: python -m pytest -q tests/test_api_smoke.py::test_datasets_quality_endpoint (backend) passed; rebuilt data quality report status changed from fail to warn for current dataset.
 - 2026-02-11T15:20:53Z | Rewrote readme.md to clean UTF-8 project snapshot: current feature completeness, data-quality status (WARN), deployment notes (Render/NAS), and submission gate rules.
 - 2026-02-11T15:20:53Z | Pre-submit validation: python -m pytest -q in backend -> 69 passed; npm run build in frontend succeeded.
+- 2026-02-11T15:21:34Z | Created commit ad07a5e (map rendering stability + deployment defaults + data-quality rule tuning + README refresh) and pushed to origin/main.
