@@ -348,3 +348,123 @@ python scripts/nas_runtime_healthcheck.py \
 - [x] æµ‹è¯•éªŒæ”¶ï¼š
   - å…¨é“¾è·¯è„šæœ¬åœ¨å°æ ·æœ¬é›†ä¸Šå¯è·‘é€šã€‚
   - `python -m pytest -q` å…¨éƒ¨é€šè¿‡åå†æäº¤ GitHubã€‚
+
+---
+
+## 12. ĞÂÔö£º±ê×¢¹¤×÷Ì¨£¨Web ±ê×¢±Õ»·£©
+
+±¾´ÎĞÂÔöÓë¡°µØÍ¼¹¤×÷Ì¨¡±²¢ÁĞµÄ¡°±ê×¢¹¤×÷Ì¨¡±£¨`/annotation`£©£¬ÓÃÓÚ¼õÉÙ Labelme À´»ØÇĞ»»³É±¾¡£
+
+### ¹¦ÄÜ
+- ÔÚ Web µØÍ¼ÉÏÒÔ¶à±ßĞÎ·½Ê½Ö´ĞĞ£º`»­ caution` / `²Á³ı caution`¡£
+- Ö§³Öµş¼Ó²é¿´£º`bathy`¡¢`ais_heatmap`¡¢`unet_pred`¡¢`caution_mask`¡£
+- Ö§³Ö´ÓÖ÷¶¯Ñ§Ï°½¨ÒéÅú´ÎÒ»¼üÌø×ªÊ±¼äÆ¬£¨½öÌø×ª£¬²»Ìæ´úÈË¹¤ÅĞ¶Ï£©¡£
+- ±£´æÊ±ºó¶Ë×Ô¶¯Ö´ĞĞ£º
+  - ÂäÅÌ `caution_mask.npy`
+  - ºÏ³É `y_class.npy`£¨0=SAFE, 1=CAUTION, 2=BLOCKED£»BLOCKED ÓÅÏÈ£©
+  - ¼ÇÂ¼ patch ÎÄ¼ş£º`outputs/annotation_workspace/patches/{timestamp}.json`
+
+### ĞÂÔö½Ó¿Ú
+- `GET /v1/annotation/workspace/patch?timestamp=...`
+- `POST /v1/annotation/workspace/patch`
+
+### ÑéÊÕ
+- `backend`: `python -m pytest -q`£¨º¬ `test_annotation_workspace.py`£©
+- `frontend`: `npm run build`
+- ĞÂÔö»­±ÊÄ£Ê½£¨stroke£©£º°´×¡Êó±êÍÏ¶¯¼´¿ÉÁ¬ĞøÍ¿Ä¨/²Á³ı caution£¬Ö§³Ö´ÖÏ¸£¨Õ¤¸ñ°ë¾¶£©µ÷½Ú¡£
+
+---
+
+## 13. ·½Ïò A Ö´ĞĞÇåµ¥£¨½ö¹æ»®£¬²»Ö´ĞĞ£©
+
+Ö´ĞĞË³Ğò½¨Òé£º`A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10`
+
+### A1. ·çÏÕ×Ö¶ÎÊı¾İÆõÔ¼ÓëÄ¿Â¼¹æ·¶
+- [ ] ÊµÏÖÄÚÈİ£º
+  - ¶¨ÒåÍ³Ò»·çÏÕ×Ö¶Î½á¹¹£º`risk_mean/risk_p90/risk_std/uncertainty`£¨`H x W`£¬`float32`£©¡£
+  - Í³Ò»ÂäÅÌÄ¿Â¼£º`outputs/risk_fields/{version}/{timestamp}.npz` Óë `meta.json`¡£
+  - Ôö¼Ó°æ±¾ĞÅÏ¢£ºÈÚºÏ²ÎÊı¡¢ãĞÖµ¡¢Ä£ĞÍ°æ±¾¡¢Êı¾İÀ´Ô´¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_risk_field_contract.py`
+  - Ëæ»ú³é 10 ¸öÊ±¼äÆ¬¼ì²é shape¡¢dtype¡¢È¡Öµ·¶Î§Ò»ÖÂ¡£
+
+### A2. ²»È·¶¨ĞÔĞ£×¼²úÏß»¯
+- [ ] ÊµÏÖÄÚÈİ£º
+  - ½«ÏÖÓĞ²»È·¶¨ĞÔĞ£×¼´ÓÀëÏß½Å±¾Éı¼¶Îª¿É¸´ÓÃÄ£¿é£¨ÑµÁ·ºó×Ô¶¯²ú³ö£©¡£
+  - ¹Ì»¯Ğ£×¼²úÎï£º`outputs/calibration/{run_id}/calibration.json`¡£
+  - Ìá¹©¼ÓÔØ½Ó¿Ú¹©ÍÆÀíÓë¹æ»®µ÷ÓÃ¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_uncertainty_calibration.py`
+  - Êä³ö ECE/Brier Ç°ºó¶Ô±È±¨±í¡£
+
+### A3. ¶àÔ´·çÏÕÈÚºÏÒıÇæ v1
+- [ ] ÊµÏÖÄÚÈİ£º
+  - ÈÚºÏÏî£º`U-Net caution/block`¡¢`uncertainty`¡¢`ice`¡¢`wave`¡¢`wind`¡¢`AIS deviation`¡£
+  - Êä³öÖÁÉÙÈı²ã·çÏÕÍ¼£º`risk_conservative`¡¢`risk_balanced`¡¢`risk_aggressive`¡£
+  - Ôö¼Ó fallback£ºÈÎÒ»µ¥Ô´È±Ê§Ê±×Ô¶¯½µ¼¶²¢¼ÇÂ¼Ô­Òò¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_risk_fusion.py`
+  - ¹¹ÔìÈ±Ê§Ô´³¡¾°£¬ÑéÖ¤½µ¼¶Â·¾¶¿ÉÔËĞĞ¡£
+
+### A4. ¹æ»®´ú¼Ûº¯ÊıÉı¼¶£¨CVaR / chance-constrained£©
+- [ ] ÊµÏÖÄÚÈİ£º
+  - ÔÚ¹æ»®Æ÷ÖĞ¼ÓÈë·çÏÕÏî£º`distance + lambda * risk`¡£
+  - Ôö¼Ó `risk_mode`¡¢`risk_budget`¡¢`confidence_level` ²ÎÊı¡£
+  - ĞÂÔöÁ½ÖÖ²ßÂÔ£º`cvar` Óë `chance_constrained`¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_planning_risk_modes.py`
+  - ÔÚ¹Ì¶¨ÆğÖÕµãÉÏ¶Ô±È `astar/dstar/risk` µÄÂ·¾¶Óë´ú¼Û·Ö½â¡£
+
+### A5. ¶àºòÑ¡²ßÂÔ²¢ĞĞ¹æ»®ÓëÅÅĞò
+- [ ] ÊµÏÖÄÚÈİ£º
+  - µ¥´ÎÇëÇó·µ»Ø 3 ÌõºòÑ¡º½Ïß£¨±£ÊØ/Æ½ºâ/¼¤½ø£©¡£
+  - Ã¿ÌõºòÑ¡¸½´ø explain£º`distance`¡¢`risk_exposure`¡¢`caution_len`¡¢`blocked_margin`¡£
+  - Ôö¼ÓºòÑ¡ÅÅĞòÂß¼­£¨Ä¬ÈÏ°´×ÛºÏ·ÖÊı£©¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_route_candidates.py`
+  - API ·µ»ØºòÑ¡ÊıÓë explain ×Ö¶ÎÍêÕûĞÔĞ£Ñé¡£
+
+### A6. ºó¶Ë API À©Õ¹Óë¼æÈİ²ã
+- [ ] ÊµÏÖÄÚÈİ£º
+  - À©Õ¹ `/v1/route/plan` Ö§³Ö·çÏÕ²ÎÊı£¬²»ÆÆ»µ¾ÉÇëÇó¡£
+  - ĞÂÔö `/v1/risk/overlay` Óë `/v1/risk/summary`¡£
+  - Ôö¼Ó schema °æ±¾ºÅÓë¼æÈİ´¦Àí¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_api_risk_extensions.py`
+  - ¾ÉÇ°¶ËÇëÇó»Ø¹é²âÊÔÈ«²¿Í¨¹ı¡£
+
+### A7. Ç°¶Ë·çÏÕ¹¤×÷Á÷Óë¿ÉÊÓ»¯
+- [ ] ÊµÏÖÄÚÈİ£º
+  - ÔÚµØÍ¼¹¤×÷Ì¨Ôö¼Ó·çÏÕ²ßÂÔÑ¡Ôñ£¨±£ÊØ/Æ½ºâ/¼¤½ø£©¡£
+  - ĞÂÔö·çÏÕÍ¼²ãÓëÍ¸Ã÷¶È¿ØÖÆ¡¢Í¼Àı¡¢ãĞÖµ»¬¿é¡£
+  - ºòÑ¡Â·ÏßÇĞ»»¿¨Æ¬£¨º¬¹Ø¼üÖ¸±ê¶Ô±È£©¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `cd frontend && npm run build`
+  - ÊÖ¹¤ÑéÊÕ£º²ßÂÔÇĞ»»¡¢Í¼²ãÏÔÊ¾¡¢ºòÑ¡ÇĞ»»Áª¶¯Õı³£¡£
+
+### A8. ¿É½âÊÍ±¨¸æÓëµ¼³öÄ£°åÉı¼¶
+- [ ] ÊµÏÖÄÚÈİ£º
+  - µ¼³ö±¨¸æÔö¼Ó·çÏÕ½âÊÍ¶Î£º¸ß·çÏÕÇø´©Ô½±ÈÀı¡¢¹æ±ÜÊÕÒæ¡¢Ô¤ËãÊ¹ÓÃÂÊ¡£
+  - Gallery ¿¨Æ¬ĞÂÔö¡°·çÏÕ²ßÂÔ¡±ºÍ¡°·çÏÕÕªÒª¡±×Ö¶Î¡£
+  - Ö§³Öµ¼³ö¶Ô±È±¨¸æ£¨Í¬ÆğÖÕµã¶à²ßÂÔ£©¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_closed_loop_report.py`
+  - µ¼³ö JSON/Í¼Æ¬ÄÚº¬·çÏÕ×Ö¶ÎÇÒ¸ñÊ½ÎÈ¶¨¡£
+
+### A9. »ù×¼ÆÀ²âÓë»Ø¹éÃÅ½û
+- [ ] ÊµÏÖÄÚÈİ£º
+  - ½¨Á¢¹Ì¶¨ benchmark ¼¯£¨µäĞÍÆğÖÕµãÓëÊ±¼äÆ¬£©¡£
+  - ×Ô¶¯Êä³ö¶Ô±È£º`distance/risk/runtime/stability`¡£
+  - Éè¶¨»Ø¹éãĞÖµ£ºĞÔÄÜÓë·çÏÕÖ¸±êÁÓ»¯Ê±×è¶ÏÌá½»¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python scripts/benchmark_planners.py`
+  - Éú³É `outputs/benchmarks/risk_benchmark_*.json`¡£
+
+### A10. Óë latest ÊµÊ±Á´Â·´òÍ¨£¨Éú²úÌ¬£©
+- [ ] ÊµÏÖÄÚÈİ£º
+  - latest À­È¡ºó×Ô¶¯´¥·¢£ºÍÆÀí -> ·çÏÕÈÚºÏ -> ¶à²ßÂÔ¹æ»®¡£
+  - ½ø¶ÈÌõÏ¸»¯µ½·çÏÕ½×¶Î£¨calibrate/fuse/plan£©¡£
+  - Copernicus ²»ÎÈ¶¨Ê±ÆôÓÃ×î½ü¿ÉÓÃ¿ìÕÕ»ØÍË²¢ÏÔÊ½ÌáÊ¾¡£
+- [ ] ²âÊÔÑéÊÕ£¨ºóĞøÖ´ĞĞ£©£º
+  - `python -m pytest -q tests/test_latest_resilience.py`
+  - ¶Ëµ½¶ËÑİÊ¾£ºÖ¸¶¨ÈÕÆÚ³É¹¦²ú³öÈı²ßÂÔº½ÏßÓë·çÏÕÍ¼²ã¡£

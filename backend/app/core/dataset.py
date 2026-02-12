@@ -145,6 +145,7 @@ class DatasetService:
         local_heatmap = self._find_local_heatmap(normalized)
         pred_file = self.settings.pred_root / "unet_v1" / f"{normalized}.npy"
         unc_file = self.settings.pred_root / "unet_v1" / f"{normalized}_uncertainty.npy"
+        caution_file = self.settings.annotation_pack_root / normalized / "caution_mask.npy"
         channel_names = self._read_channel_names(sample)
         legacy_bathy_exists = False
         if legacy and legacy.get("x_bathy"):
@@ -180,6 +181,12 @@ class DatasetService:
                 "name": "U-Net Uncertainty",
                 "available": unc_file.exists() or can_infer_unet,
                 "unit": "entropy",
+            },
+            {
+                "id": "caution_mask",
+                "name": "Caution Mask (Manual Label)",
+                "available": caution_file.exists() or can_infer_unet,
+                "unit": "mask",
             },
             {
                 "id": "ice",

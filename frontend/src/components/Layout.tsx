@@ -17,6 +17,10 @@ export default function Layout() {
   const location = useLocation();
   const [dataset, setDataset] = useState("july-oct-2024");
   const { t } = useLanguage();
+  const isScenario = location.pathname === "/";
+  const isWorkspace = location.pathname.startsWith("/workspace");
+  const isAnnotation = location.pathname.startsWith("/annotation");
+  const isExport = location.pathname.startsWith("/export");
 
   return (
     <div className="min-h-dvh flex flex-col bg-background">
@@ -34,27 +38,36 @@ export default function Layout() {
           <nav className="flex flex-wrap items-center gap-1">
             <Link to="/">
               <Button
-                variant={location.pathname === "/" ? "default" : "ghost"}
+                variant="ghost"
                 size="sm"
-                className={location.pathname === "/" ? "bg-blue-600 hover:bg-blue-700" : ""}
+                className={isScenario ? "bg-blue-600 text-white hover:bg-blue-700 hover:text-white" : ""}
               >
                 {t("nav.scenario")}
               </Button>
             </Link>
             <Link to="/workspace">
               <Button
-                variant={location.pathname === "/workspace" ? "default" : "ghost"}
+                variant="ghost"
                 size="sm"
-                className={location.pathname === "/workspace" ? "bg-purple-600 hover:bg-purple-700" : ""}
+                className={isWorkspace ? "bg-purple-600 text-white hover:bg-purple-700 hover:text-white" : ""}
               >
                 {t("nav.workspace")}
               </Button>
             </Link>
+            <Link to="/annotation">
+              <Button
+                variant="ghost"
+                size="sm"
+                className={isAnnotation ? "bg-amber-600 text-white hover:bg-amber-700 hover:text-white" : ""}
+              >
+                {t("nav.annotation")}
+              </Button>
+            </Link>
             <Link to="/export">
               <Button
-                variant={location.pathname === "/export" ? "default" : "ghost"}
+                variant="ghost"
                 size="sm"
-                className={location.pathname === "/export" ? "bg-green-600 hover:bg-green-700" : ""}
+                className={isExport ? "bg-green-600 text-white hover:bg-green-700 hover:text-white" : ""}
               >
                 {t("nav.export")}
               </Button>

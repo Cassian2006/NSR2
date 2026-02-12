@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_eval import router as eval_router
 from app.api.routes_active_review import router as active_review_router
+from app.api.routes_annotation_workspace import router as annotation_workspace_router
 from app.api.routes_gallery import router as gallery_router
 from app.api.routes_infer import router as infer_router
 from app.api.routes_layers import router as layers_router
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(plan_router, prefix="/v1")
     app.include_router(latest_router, prefix="/v1")
     app.include_router(active_review_router, prefix="/v1")
+    app.include_router(annotation_workspace_router, prefix="/v1")
     app.include_router(gallery_router, prefix="/v1")
     app.include_router(eval_router, prefix="/v1")
 

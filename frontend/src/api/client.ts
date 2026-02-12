@@ -401,6 +401,32 @@ export type ActiveReviewItem = {
   };
 };
 
+export type AnnotationPoint = { lat: number; lon: number };
+export type AnnotationOperation = {
+  id?: string;
+  mode: "add" | "erase";
+  shape?: "polygon" | "stroke";
+  radius_cells?: number;
+  points: AnnotationPoint[];
+};
+
+export type AnnotationPatchResponse = {
+  timestamp: string;
+  updated_at?: string;
+  patch_file: string;
+  caution_file: string;
+  y_class_file: string;
+  operations: AnnotationOperation[];
+  stats: {
+    shape: number[];
+    blocked_pixels: number;
+    caution_pixels: number;
+    caution_ratio: number;
+    operations_count: number;
+    has_patch_file?: boolean;
+  };
+};
+
 export async function runAisBacktest(payload: { gallery_id?: string; timestamp?: string; route_geojson?: unknown }) {
   return apiFetch<{ metrics: AisBacktestMetrics; gallery_id?: string; note?: string }>("/eval/ais/backtest", {
     method: "POST",
@@ -435,6 +461,27 @@ export async function postActiveReviewDecision(payload: {
   }>("/active/review/decision", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function getAnnotationPatch(timestamp: string) {
+  return apiFetch<AnnotationPatchResponse>(`/annotation/workspace/patch?timestamp=${encodeURIComponent(timestamp)}`);
+}
+
+export async function saveAnnotationPatch(payload: {
+  timestamp: string;
+  operations: AnnotationOperation[];
+  note?: string;
+  author?: string;
+}) {
+  return apiFetch<AnnotationPatchResponse>("/annotation/workspace/patch", {
+    method: "POST",
+    body: JSON.stringify({
+      timestamp: payload.timestamp,
+      operations: payload.operations,
+      note: payload.note ?? "",
+      author: payload.author ?? "web",
+    }),
   });
 }
 

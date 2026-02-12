@@ -270,6 +270,13 @@ def _render_unet(
     return image
 
 
+def _render_caution_mask(sampled: np.ndarray, inside: np.ndarray) -> np.ndarray:
+    image = _empty_image(sampled.shape[1], sampled.shape[0])
+    caution = (sampled > 0.5) & inside
+    image[caution] = np.asarray([245, 158, 11, 168], dtype=np.uint8)
+    return image
+
+
 def _normalize_ice_sampled(sampled: np.ndarray) -> np.ndarray:
     # In source grids, open water is often represented as NaN for ice_conc.
     # Treat it as 0% concentration so the ice layer stays spatially continuous over sea.
@@ -305,6 +312,16 @@ def _load_layer_grid(settings: Settings, timestamp: str, layer: str) -> np.ndarr
 
     if layer == "bathy":
         return blocked
+
+    if layer == "caution_mask":
+        if x_stack is not None and blocked is not None:
+            caution_path = settings.annotation_pack_root / timestamp / "caution_mask.npy"
+            if caution_path.exists():
+                caution = np.load(caution_path).astype(np.float32)
+                if caution.ndim == 2 and caution.shape == blocked.shape:
+                    return caution
+            return np.zeros_like(blocked, dtype=np.float32)
+        return None
 
     if layer == "ais_heatmap":
         if x_stack is not None:
@@ -381,7 +398,7 @@ def render_overlay_png(
         return _encode_png_rgba(_empty_image(width, height))
 
     geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
-    sampling_mode = "nearest" if layer in {"bathy", "unet_pred"} else "bilinear"
+    sampling_mode = "nearest" if layer in {"bathy", "unet_pred", "caution_mask"} else "bilinear"
     sampled, inside = _sample_grid(
         grid.astype(np.float32),
         bbox,
@@ -393,6 +410,8 @@ def render_overlay_png(
 
     if layer == "bathy":
         image = _render_bathy(sampled, inside)
+    elif layer == "caution_mask":
+        image = _render_caution_mask(sampled, inside)
     elif layer == "unet_pred":
         bathy_sampled = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
@@ -543,7 +562,7 @@ def render_tile_png(
 
     geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
     lats, lons = _tile_pixel_latlon_axes(z=z, x=x, y=y, tile_size=tile_size)
-    sampling_mode = "nearest" if layer in {"bathy", "unet_pred"} else "bilinear"
+    sampling_mode = "nearest" if layer in {"bathy", "unet_pred", "caution_mask"} else "bilinear"
     sampled, inside = _sample_grid_from_axes(
         grid.astype(np.float32),
         lats,
@@ -554,6 +573,8 @@ def render_tile_png(
 
     if layer == "bathy":
         image = _render_bathy(sampled, inside)
+    elif layer == "caution_mask":
+        image = _render_caution_mask(sampled, inside)
     elif layer == "unet_pred":
         bathy_sampled = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")

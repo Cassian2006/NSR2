@@ -545,3 +545,14 @@ pm run build in frontend (pass).
 - 2026-02-12T00:32:39.0066804+00:00 | B10 smoke acceptance run succeeded with run-id=b10_smoke; artifacts generated under backend/outputs/pipelines/b10_smoke (qc report, active suggestions, label batch export, train summary, benchmark JSON, closed-loop report JSON/MD).
 - 2026-02-12T00:32:39.0066804+00:00 | Resume verification: reran same command with --resume and observed immediate success without re-executing completed stages.
 - 2026-02-12T00:32:39.0066804+00:00 | Validation: python -m pytest -q tests/test_closed_loop_pipeline.py tests/test_closed_loop_report.py -> 5 passed; python -m pytest -q in backend -> 103 passed.
+[2026-02-12 09:37:18 +00:00] UI排查: 确认主动学习标注建议入口位于 frontend/src/pages/MapWorkspace.tsx（规划卡片内），非独立页面；若无批次会显示‘暂无建议批次’提示。
+[2026-02-12 09:55:14 +00:00] 新增标注工作台并列页面: /annotation（frontend/src/pages/AnnotationWorkspace.tsx），支持多边形画/擦 caution、图层叠加与保存。
+[2026-02-12 09:55:14 +00:00] 新增后端标注接口: GET/POST /v1/annotation/workspace/patch（backend/app/api/routes_annotation_workspace.py），保存 patch 并生成 caution_mask.npy/y_class.npy。
+[2026-02-12 09:55:14 +00:00] 新增 caution_mask 图层渲染与可用性（backend/app/core/render.py, backend/app/core/dataset.py）；通过 backend pytest(105 passed) 与 frontend build 验证。
+[2026-02-12 10:06:10 +00:00] 标注工作台新增画笔(stroke)模式：前端拖动涂抹/擦除 + 后端stroke栅格化落盘；新增测试覆盖并通过pytest/build。
+[2026-02-12 10:42:03 +00:00] UI修复: 顶部导航激活态统一使用显式 text-white + 彩色背景，修复标注工作台tab白字可读性问题。
+[2026-02-12 10:42:03 +00:00] 地图工作台去重: 移除主动学习标注建议模块及其状态/API依赖，标注功能仅保留在独立标注工作台(/annotation)。
+[2026-02-12 10:42:03 +00:00] 验证: frontend npm run build通过；backend pytest通过(106 passed)。
+[2026-02-12 10:43:50 +00:00] 文档更新: 按要求新增readme方向A详细任务清单(A1-A10)，仅规划不执行。
+[2026-02-12 10:47:57 +00:00] 提交前审查: backend python -m pytest -q 通过(106 passed)。
+[2026-02-12 10:47:57 +00:00] 提交前审查: frontend npm run build 通过。

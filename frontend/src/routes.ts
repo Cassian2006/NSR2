@@ -7,6 +7,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, lazy: async () => ({ Component: (await import("./pages/ScenarioSelector")).default }) },
       { path: "workspace", lazy: async () => ({ Component: (await import("./pages/MapWorkspace")).default }) },
+      { path: "annotation", lazy: async () => ({ Component: (await import("./pages/AnnotationWorkspace")).default }) },
       { path: "export", lazy: async () => ({ Component: (await import("./pages/ExportReport")).default }) },
     ],
   },
