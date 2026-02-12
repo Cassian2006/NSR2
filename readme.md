@@ -351,120 +351,120 @@ python scripts/nas_runtime_healthcheck.py \
 
 ---
 
-## 12. ��������ע����̨��Web ��ע�ջ���
+## 12. 新增：标注工作台（Web 标注闭环）
 
-���������롰��ͼ����̨�����еġ���ע����̨����`/annotation`�������ڼ��� Labelme �����л��ɱ���
+本次新增与“地图工作台”并列的“标注工作台”（`/annotation`），用于减少 Labelme 来回切换成本。
 
-### ����
-- �� Web ��ͼ���Զ���η�ʽִ�У�`�� caution` / `���� caution`��
-- ֧�ֵ��Ӳ鿴��`bathy`��`ais_heatmap`��`unet_pred`��`caution_mask`��
-- ֧�ִ�����ѧϰ��������һ����תʱ��Ƭ������ת��������˹��жϣ���
-- ����ʱ����Զ�ִ�У�
-  - ���� `caution_mask.npy`
-  - �ϳ� `y_class.npy`��0=SAFE, 1=CAUTION, 2=BLOCKED��BLOCKED ���ȣ�
-  - ��¼ patch �ļ���`outputs/annotation_workspace/patches/{timestamp}.json`
+### 功能
+- 在 Web 地图上以多边形方式执行：`画 caution` / `擦除 caution`。
+- 支持叠加查看：`bathy`、`ais_heatmap`、`unet_pred`、`caution_mask`。
+- 支持从主动学习建议批次一键跳转时间片（仅跳转，不替代人工判断）。
+- 保存时后端自动执行：
+  - 落盘 `caution_mask.npy`
+  - 合成 `y_class.npy`（0=SAFE, 1=CAUTION, 2=BLOCKED；BLOCKED 优先）
+  - 记录 patch 文件：`outputs/annotation_workspace/patches/{timestamp}.json`
 
-### �����ӿ�
+### 新增接口
 - `GET /v1/annotation/workspace/patch?timestamp=...`
 - `POST /v1/annotation/workspace/patch`
 
-### ����
-- `backend`: `python -m pytest -q`���� `test_annotation_workspace.py`��
+### 验收
+- `backend`: `python -m pytest -q`（含 `test_annotation_workspace.py`）
 - `frontend`: `npm run build`
-- ��������ģʽ��stroke������ס����϶���������ͿĨ/���� caution��֧�ִ�ϸ��դ��뾶�����ڡ�
+- 新增画笔模式（stroke）：按住鼠标拖动即可连续涂抹/擦除 caution，支持粗细（栅格半径）调节。
 
 ---
 
-## 13. ���� A ִ���嵥�����滮����ִ�У�
+## 13. 方向 A 执行清单（仅规划，不执行）
 
-ִ��˳���飺`A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10`
+执行顺序建议：`A1 -> A2 -> A3 -> A4 -> A5 -> A6 -> A7 -> A8 -> A9 -> A10`
 
-### A1. �����ֶ�������Լ��Ŀ¼�淶
-- [ ] ʵ�����ݣ�
-  - ����ͳһ�����ֶνṹ��`risk_mean/risk_p90/risk_std/uncertainty`��`H x W`��`float32`����
-  - ͳһ����Ŀ¼��`outputs/risk_fields/{version}/{timestamp}.npz` �� `meta.json`��
-  - ���Ӱ汾��Ϣ���ںϲ�������ֵ��ģ�Ͱ汾��������Դ��
-- [ ] �������գ�����ִ�У���
+### A1. 风险字段数据契约与目录规范
+- [ ] 实现内容：
+  - 定义统一风险字段结构：`risk_mean/risk_p90/risk_std/uncertainty`（`H x W`，`float32`）。
+  - 统一落盘目录：`outputs/risk_fields/{version}/{timestamp}.npz` 与 `meta.json`。
+  - 增加版本信息：融合参数、阈值、模型版本、数据来源。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_risk_field_contract.py`
-  - ����� 10 ��ʱ��Ƭ��� shape��dtype��ȡֵ��Χһ�¡�
+  - 随机抽 10 个时间片检查 shape、dtype、取值范围一致。
 
-### A2. ��ȷ����У׼���߻�
-- [ ] ʵ�����ݣ�
-  - �����в�ȷ����У׼�����߽ű�����Ϊ�ɸ���ģ�飨ѵ�����Զ���������
-  - �̻�У׼���`outputs/calibration/{run_id}/calibration.json`��
-  - �ṩ���ؽӿڹ�������滮���á�
-- [ ] �������գ�����ִ�У���
+### A2. 不确定性校准产线化
+- [ ] 实现内容：
+  - 将现有不确定性校准从离线脚本升级为可复用模块（训练后自动产出）。
+  - 固化校准产物：`outputs/calibration/{run_id}/calibration.json`。
+  - 提供加载接口供推理与规划调用。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_uncertainty_calibration.py`
-  - ��� ECE/Brier ǰ��Աȱ�����
+  - 输出 ECE/Brier 前后对比报表。
 
-### A3. ��Դ�����ں����� v1
-- [ ] ʵ�����ݣ�
-  - �ں��`U-Net caution/block`��`uncertainty`��`ice`��`wave`��`wind`��`AIS deviation`��
-  - ��������������ͼ��`risk_conservative`��`risk_balanced`��`risk_aggressive`��
-  - ���� fallback����һ��Դȱʧʱ�Զ���������¼ԭ��
-- [ ] �������գ�����ִ�У���
+### A3. 多源风险融合引擎 v1
+- [ ] 实现内容：
+  - 融合项：`U-Net caution/block`、`uncertainty`、`ice`、`wave`、`wind`、`AIS deviation`。
+  - 输出至少三层风险图：`risk_conservative`、`risk_balanced`、`risk_aggressive`。
+  - 增加 fallback：任一单源缺失时自动降级并记录原因。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_risk_fusion.py`
-  - ����ȱʧԴ��������֤����·�������С�
+  - 构造缺失源场景，验证降级路径可运行。
 
-### A4. �滮���ۺ���������CVaR / chance-constrained��
-- [ ] ʵ�����ݣ�
-  - �ڹ滮���м�������`distance + lambda * risk`��
-  - ���� `risk_mode`��`risk_budget`��`confidence_level` ������
-  - �������ֲ��ԣ�`cvar` �� `chance_constrained`��
-- [ ] �������գ�����ִ�У���
+### A4. 规划代价函数升级（CVaR / chance-constrained）
+- [ ] 实现内容：
+  - 在规划器中加入风险项：`distance + lambda * risk`。
+  - 增加 `risk_mode`、`risk_budget`、`confidence_level` 参数。
+  - 新增两种策略：`cvar` 与 `chance_constrained`。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_planning_risk_modes.py`
-  - �ڹ̶����յ��϶Ա� `astar/dstar/risk` ��·������۷ֽ⡣
+  - 在固定起终点上对比 `astar/dstar/risk` 的路径与代价分解。
 
-### A5. ���ѡ���Բ��й滮������
-- [ ] ʵ�����ݣ�
-  - �������󷵻� 3 ����ѡ���ߣ�����/ƽ��/��������
-  - ÿ����ѡ���� explain��`distance`��`risk_exposure`��`caution_len`��`blocked_margin`��
-  - ���Ӻ�ѡ�����߼���Ĭ�ϰ��ۺϷ�������
-- [ ] �������գ�����ִ�У���
+### A5. 多候选策略并行规划与排序
+- [ ] 实现内容：
+  - 单次请求返回 3 条候选航线（保守/平衡/激进）。
+  - 每条候选附带 explain：`distance`、`risk_exposure`、`caution_len`、`blocked_margin`。
+  - 增加候选排序逻辑（默认按综合分数）。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_route_candidates.py`
-  - API ���غ�ѡ���� explain �ֶ�������У�顣
+  - API 返回候选数与 explain 字段完整性校验。
 
-### A6. ��� API ��չ����ݲ�
-- [ ] ʵ�����ݣ�
-  - ��չ `/v1/route/plan` ֧�ַ��ղ��������ƻ�������
-  - ���� `/v1/risk/overlay` �� `/v1/risk/summary`��
-  - ���� schema �汾������ݴ�����
-- [ ] �������գ�����ִ�У���
+### A6. 后端 API 扩展与兼容层
+- [ ] 实现内容：
+  - 扩展 `/v1/route/plan` 支持风险参数，不破坏旧请求。
+  - 新增 `/v1/risk/overlay` 与 `/v1/risk/summary`。
+  - 增加 schema 版本号与兼容处理。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_api_risk_extensions.py`
-  - ��ǰ������ع����ȫ��ͨ����
+  - 旧前端请求回归测试全部通过。
 
-### A7. ǰ�˷��չ���������ӻ�
-- [ ] ʵ�����ݣ�
-  - �ڵ�ͼ����̨���ӷ��ղ���ѡ�񣨱���/ƽ��/��������
-  - ��������ͼ����͸���ȿ��ơ�ͼ������ֵ���顣
-  - ��ѡ·���л���Ƭ�����ؼ�ָ��Աȣ���
-- [ ] �������գ�����ִ�У���
+### A7. 前端风险工作流与可视化
+- [ ] 实现内容：
+  - 在地图工作台增加风险策略选择（保守/平衡/激进）。
+  - 新增风险图层与透明度控制、图例、阈值滑块。
+  - 候选路线切换卡片（含关键指标对比）。
+- [ ] 测试验收（后续执行）：
   - `cd frontend && npm run build`
-  - �ֹ����գ������л���ͼ����ʾ����ѡ�л�����������
+  - 手工验收：策略切换、图层显示、候选切换联动正常。
 
-### A8. �ɽ��ͱ����뵼��ģ������
-- [ ] ʵ�����ݣ�
-  - �����������ӷ��ս��ͶΣ��߷�������Խ������������桢Ԥ��ʹ���ʡ�
-  - Gallery ��Ƭ���������ղ��ԡ��͡�����ժҪ���ֶΡ�
-  - ֧�ֵ����Աȱ��棨ͬ���յ����ԣ���
-- [ ] �������գ�����ִ�У���
+### A8. 可解释报告与导出模板升级
+- [ ] 实现内容：
+  - 导出报告增加风险解释段：高风险区穿越比例、规避收益、预算使用率。
+  - Gallery 卡片新增“风险策略”和“风险摘要”字段。
+  - 支持导出对比报告（同起终点多策略）。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_closed_loop_report.py`
-  - ���� JSON/ͼƬ�ں������ֶ��Ҹ�ʽ�ȶ���
+  - 导出 JSON/图片内含风险字段且格式稳定。
 
-### A9. ��׼������ع��Ž�
-- [ ] ʵ�����ݣ�
-  - �����̶� benchmark �����������յ���ʱ��Ƭ����
-  - �Զ�����Աȣ�`distance/risk/runtime/stability`��
-  - �趨�ع���ֵ�����������ָ���ӻ�ʱ����ύ��
-- [ ] �������գ�����ִ�У���
+### A9. 基准评测与回归门禁
+- [ ] 实现内容：
+  - 建立固定 benchmark 集（典型起终点与时间片）。
+  - 自动输出对比：`distance/risk/runtime/stability`。
+  - 设定回归阈值：性能与风险指标劣化时阻断提交。
+- [ ] 测试验收（后续执行）：
   - `python scripts/benchmark_planners.py`
-  - ���� `outputs/benchmarks/risk_benchmark_*.json`��
+  - 生成 `outputs/benchmarks/risk_benchmark_*.json`。
 
-### A10. �� latest ʵʱ��·��ͨ������̬��
-- [ ] ʵ�����ݣ�
-  - latest ��ȡ���Զ����������� -> �����ں� -> ����Թ滮��
-  - ������ϸ�������ս׶Σ�calibrate/fuse/plan����
-  - Copernicus ���ȶ�ʱ����������ÿ��ջ��˲���ʽ��ʾ��
-- [ ] �������գ�����ִ�У���
+### A10. 与 latest 实时链路打通（生产态）
+- [ ] 实现内容：
+  - latest 拉取后自动触发：推理 -> 风险融合 -> 多策略规划。
+  - 进度条细化到风险阶段（calibrate/fuse/plan）。
+  - Copernicus 不稳定时启用最近可用快照回退并显式提示。
+- [ ] 测试验收（后续执行）：
   - `python -m pytest -q tests/test_latest_resilience.py`
-  - �˵�����ʾ��ָ�����ڳɹ����������Ժ��������ͼ�㡣
+  - 端到端演示：指定日期成功产出三策略航线与风险图层。

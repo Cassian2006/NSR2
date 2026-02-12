@@ -556,3 +556,5 @@ pm run build in frontend (pass).
 [2026-02-12 10:43:50 +00:00] 文档更新: 按要求新增readme方向A详细任务清单(A1-A10)，仅规划不执行。
 [2026-02-12 10:47:57 +00:00] 提交前审查: backend python -m pytest -q 通过(106 passed)。
 [2026-02-12 10:47:57 +00:00] 提交前审查: frontend npm run build 通过。
+- [2026-02-12 10:58:17] Fixed readme.md mojibake by recovering mixed-encoding sections from HEAD and normalizing to UTF-8.
+- [2026-02-12 11:03:37] Pre-push check: backend pytest passed (106 passed).
