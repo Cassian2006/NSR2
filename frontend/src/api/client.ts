@@ -371,8 +371,68 @@ export type AisBacktestMetrics = {
   alignment_zscore: number;
 };
 
+export type ActiveReviewRun = {
+  run_id: string;
+  created_at: string;
+  candidate_count: number;
+  top_k: number;
+  mapping_count: number;
+  accepted_count: number;
+  needs_revision_count: number;
+  summary_file: string;
+};
+
+export type ActiveReviewItem = {
+  rank: number;
+  timestamp: string;
+  score: number;
+  uncertainty_score: number;
+  route_impact_score: number;
+  class_balance_score: number;
+  pred_caution_ratio: number;
+  dominant_factor: string;
+  explain_json: string;
+  explain_png: string;
+  explanation: Record<string, unknown>;
+  decision?: {
+    decision?: "accepted" | "needs_revision" | string;
+    note?: string;
+    updated_at?: string;
+  };
+};
+
 export async function runAisBacktest(payload: { gallery_id?: string; timestamp?: string; route_geojson?: unknown }) {
   return apiFetch<{ metrics: AisBacktestMetrics; gallery_id?: string; note?: string }>("/eval/ais/backtest", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getActiveReviewRuns() {
+  return apiFetch<{ runs: ActiveReviewRun[] }>("/active/review/runs");
+}
+
+export async function getActiveReviewItems(runId?: string, limit = 20) {
+  const params = new URLSearchParams();
+  if (runId) params.set("run_id", runId);
+  params.set("limit", String(limit));
+  return apiFetch<{ run_id: string; items: ActiveReviewItem[]; count: number }>(`/active/review/items?${params.toString()}`);
+}
+
+export async function postActiveReviewDecision(payload: {
+  run_id: string;
+  timestamp: string;
+  decision: "accepted" | "needs_revision";
+  note?: string;
+}) {
+  return apiFetch<{
+    ok: boolean;
+    run_id: string;
+    timestamp: string;
+    decision: string;
+    state_file: string;
+    updated_at: string;
+  }>("/active/review/decision", {
     method: "POST",
     body: JSON.stringify(payload),
   });

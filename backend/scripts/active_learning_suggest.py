@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.model.active_explain import explain_sample, load_channel_names, render_explanation_card
 from app.model.tiny_unet import TinyUNet
 
 
@@ -70,6 +72,36 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Output root directory. Defaults to outputs/active_learning/<runid>",
     )
+    p.add_argument(
+        "--w-uncertainty",
+        type=float,
+        default=0.55,
+        help="Weight of uncertainty component in final score.",
+    )
+    p.add_argument(
+        "--w-route-impact",
+        type=float,
+        default=0.30,
+        help="Weight of route-impact component in final score.",
+    )
+    p.add_argument(
+        "--w-class-balance",
+        type=float,
+        default=0.15,
+        help="Weight of class-balance component in final score.",
+    )
+    p.add_argument(
+        "--class-balance-target",
+        type=float,
+        default=-1.0,
+        help="Desired caution ratio on sea. Negative means auto from labeled set.",
+    )
+    p.add_argument(
+        "--class-balance-width",
+        type=float,
+        default=0.025,
+        help="Width for class-balance preference curve (smaller = stricter around target).",
+    )
     return p.parse_args()
 
 
@@ -118,6 +150,64 @@ def _entropy_from_probs(probs: np.ndarray) -> np.ndarray:
     return -np.sum(p * np.log(p), axis=0)
 
 
+def _normalize_weights(w_uncertainty: float, w_route_impact: float, w_class_balance: float) -> tuple[float, float, float]:
+    w = np.asarray([w_uncertainty, w_route_impact, w_class_balance], dtype=np.float64)
+    w = np.clip(w, 0.0, None)
+    s = float(w.sum())
+    if s <= 0.0:
+        return (0.55, 0.30, 0.15)
+    w /= s
+    return (float(w[0]), float(w[1]), float(w[2]))
+
+
+def _robust_minmax(values: np.ndarray, *, q_low: float = 5.0, q_high: float = 95.0) -> np.ndarray:
+    if values.size == 0:
+        return values.astype(np.float32)
+    lo = float(np.percentile(values, q_low))
+    hi = float(np.percentile(values, q_high))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        vmin = float(np.min(values))
+        vmax = float(np.max(values))
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+            return np.zeros_like(values, dtype=np.float32)
+        return np.clip((values - vmin) / (vmax - vmin), 0.0, 1.0).astype(np.float32)
+    return np.clip((values - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+
+def _score_class_balance(pred_ratio: float, target_ratio: float, width: float) -> float:
+    width = max(1e-6, float(width))
+    z = (float(pred_ratio) - float(target_ratio)) / width
+    return float(math.exp(-0.5 * z * z))
+
+
+def _estimate_labeled_caution_ratio(annotation_root: Path) -> float:
+    ratios: list[float] = []
+    for folder in sorted(annotation_root.iterdir()):
+        if not folder.is_dir() or len(folder.name) != 13:
+            continue
+        b_path = folder / "blocked_mask.npy"
+        c_path = folder / "caution_mask.npy"
+        if not b_path.exists() or not c_path.exists():
+            continue
+        try:
+            blocked = np.load(b_path, mmap_mode="r")
+            caution = np.load(c_path, mmap_mode="r")
+        except Exception:
+            continue
+        if blocked.ndim != 2 or caution.ndim != 2 or blocked.shape != caution.shape:
+            continue
+        sea = blocked == 0
+        sea_count = int(sea.sum())
+        if sea_count <= 0:
+            continue
+        ratio = float((caution[sea] > 0).mean())
+        if np.isfinite(ratio):
+            ratios.append(ratio)
+    if not ratios:
+        return 0.03
+    return float(np.median(np.asarray(ratios, dtype=np.float32)))
+
+
 def _cap_threshold_by_ratio(
     caution_prob: np.ndarray,
     sea: np.ndarray,
@@ -156,6 +246,50 @@ def _smooth_binary_mask(mask: np.ndarray, min_neighbors: int, iters: int) -> np.
             + padded[2:, 2:]
         )
         out = (neighbors >= min_neighbors).astype(np.uint8)
+    return out
+
+
+def _compute_scores(
+    rows: list[dict[str, object]],
+    *,
+    class_balance_target: float,
+    class_balance_width: float,
+    w_uncertainty: float,
+    w_route_impact: float,
+    w_class_balance: float,
+) -> list[dict[str, object]]:
+    if not rows:
+        return rows
+    unc_raw = np.asarray([float(r.get("uncertainty_raw", 0.0)) for r in rows], dtype=np.float32)
+    route_raw = np.asarray([float(r.get("route_impact_raw", 0.0)) for r in rows], dtype=np.float32)
+    unc_norm = _robust_minmax(unc_raw)
+    route_norm = _robust_minmax(route_raw)
+    wu, wr, wc = _normalize_weights(w_uncertainty, w_route_impact, w_class_balance)
+
+    out: list[dict[str, object]] = []
+    for idx, row in enumerate(rows):
+        pred_ratio = float(row.get("pred_caution_ratio", 0.0))
+        class_balance_score = _score_class_balance(
+            pred_ratio=pred_ratio,
+            target_ratio=class_balance_target,
+            width=class_balance_width,
+        )
+        uncertainty_score = float(unc_norm[idx])
+        route_impact_score = float(route_norm[idx])
+        score = float(wu * uncertainty_score + wr * route_impact_score + wc * class_balance_score)
+        enriched = dict(row)
+        enriched.update(
+            {
+                "uncertainty_score": uncertainty_score,
+                "route_impact_score": route_impact_score,
+                "class_balance_score": class_balance_score,
+                "score": score,
+                "score_w_uncertainty": wu,
+                "score_w_route_impact": wr,
+                "score_w_class_balance": wc,
+            }
+        )
+        out.append(enriched)
     return out
 
 
@@ -211,9 +345,19 @@ def main() -> None:
     if not candidates:
         raise RuntimeError("No unlabeled candidates found.")
 
+    auto_target = _estimate_labeled_caution_ratio(annotation_root=annotation_root)
+    class_balance_target = (
+        float(args.class_balance_target)
+        if float(args.class_balance_target) >= 0.0
+        else float(np.clip(auto_target, 0.005, 0.20))
+    )
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TinyUNet(in_channels=in_channels, n_classes=3, base=24).to(device)
-    ckpt = torch.load(ckpt_path, map_location=device)
+    try:
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    except TypeError:
+        ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model"])
     model.eval()
 
@@ -266,30 +410,54 @@ def main() -> None:
         margin_mean = float(margin[sea].mean())
         near_unc = float(entropy[near_sea].mean()) if int(near_sea.sum()) > 0 else ent_mean
         pred_ratio = float((caution_prob[sea] > args.pred_threshold).mean())
+        ais_raw = x[-1]
+        sea_vals = ais_raw[sea]
+        if sea_vals.size > 0 and np.isfinite(sea_vals).any():
+            lo = float(np.percentile(sea_vals, 5))
+            hi = float(np.percentile(sea_vals, 95))
+            if hi > lo:
+                ais_norm = np.clip((ais_raw - lo) / (hi - lo), 0.0, 1.0)
+            else:
+                ais_norm = np.zeros_like(ais_raw, dtype=np.float32)
+        else:
+            ais_norm = np.zeros_like(ais_raw, dtype=np.float32)
+        corridor_weighted_caution = float((caution_prob[sea] * ais_norm[sea]).mean()) if int(sea.sum()) > 0 else 0.0
 
-        # Composite active-learning score.
-        score = 0.45 * ent_p95 + 0.30 * ent_mean + 0.15 * near_unc + 0.10 * margin_mean
+        uncertainty_raw = 0.55 * ent_p95 + 0.30 * ent_mean + 0.15 * margin_mean
+        route_impact_raw = 0.60 * near_unc + 0.40 * corridor_weighted_caution
 
         rows.append(
             {
                 "timestamp": ts,
-                "score": score,
+                "uncertainty_raw": uncertainty_raw,
+                "route_impact_raw": route_impact_raw,
                 "entropy_mean": ent_mean,
                 "entropy_p95": ent_p95,
                 "near_boundary_unc": near_unc,
                 "margin_mean": margin_mean,
                 "pred_caution_ratio": pred_ratio,
+                "corridor_weighted_caution": corridor_weighted_caution,
             }
         )
         if i % 50 == 0:
             print(f"scored={i}/{len(candidates)}")
 
+    rows = _compute_scores(
+        rows,
+        class_balance_target=class_balance_target,
+        class_balance_width=float(args.class_balance_width),
+        w_uncertainty=float(args.w_uncertainty),
+        w_route_impact=float(args.w_route_impact),
+        w_class_balance=float(args.w_class_balance),
+    )
     rows = sorted(rows, key=lambda r: float(r["score"]), reverse=True)
     top = rows[: max(1, args.top_k)]
 
     # Export top-k previews + suggested masks.
     labelme_dir = out_dir / "labelme_active_topk"
     labelme_dir.mkdir(parents=True, exist_ok=True)
+    explain_dir = out_dir / "explanations"
+    explain_dir.mkdir(parents=True, exist_ok=True)
     mapping_rows: list[dict[str, object]] = []
     for rank, row in enumerate(top, start=1):
         ts = str(row["timestamp"])
@@ -303,6 +471,7 @@ def main() -> None:
         xt = torch.from_numpy(xn[None, ...]).to(device)
         with torch.no_grad():
             probs = torch.softmax(model(xt), dim=1).cpu().numpy()[0]
+        entropy = _entropy_from_probs(probs)
         caution_prob = probs[1]
         effective_threshold = _cap_threshold_by_ratio(
             caution_prob=caution_prob,
@@ -340,13 +509,37 @@ def main() -> None:
         Image.fromarray(base).save(img_path)
         Image.fromarray(overlay).save(sug_path)
         Image.fromarray(heat).save(heat_path)
+
+        channel_names = load_channel_names(folder, n_channels=int(x.shape[0]))
+        explain = explain_sample(
+            x_stack=x,
+            blocked_mask=blocked,
+            caution_prob=caution_prob,
+            entropy=entropy,
+            channel_names=channel_names,
+            suggested_mask=suggested,
+        )
+        explain["timestamp"] = ts
+        explain["rank"] = rank
+        explain["score"] = float(row["score"])
+        explain_json_path = explain_dir / f"{file_base}_explain.json"
+        explain_png_path = explain_dir / f"{file_base}_explain.png"
+        explain_json_path.write_text(json.dumps(explain, ensure_ascii=False, indent=2), encoding="utf-8")
+        render_explanation_card(explain, explain_png_path, title=f"{ts} (rank={rank})")
+
         mapping_rows.append(
             {
                 "rank": rank,
                 "filename": f"{file_base}.png",
                 "timestamp": ts,
                 "score": float(row["score"]),
+                "uncertainty_score": float(row["uncertainty_score"]),
+                "route_impact_score": float(row["route_impact_score"]),
+                "class_balance_score": float(row["class_balance_score"]),
                 "pred_caution_ratio": float(row["pred_caution_ratio"]),
+                "dominant_factor": str(explain.get("dominant_factor", "")),
+                "explain_json": str(explain_json_path),
+                "explain_png": str(explain_png_path),
             }
         )
 
@@ -357,10 +550,19 @@ def main() -> None:
             fieldnames=[
                 "timestamp",
                 "score",
+                "uncertainty_score",
+                "route_impact_score",
+                "class_balance_score",
+                "score_w_uncertainty",
+                "score_w_route_impact",
+                "score_w_class_balance",
+                "uncertainty_raw",
+                "route_impact_raw",
                 "entropy_mean",
                 "entropy_p95",
                 "near_boundary_unc",
                 "margin_mean",
+                "corridor_weighted_caution",
                 "pred_caution_ratio",
             ],
         )
@@ -369,7 +571,22 @@ def main() -> None:
 
     mapping_csv = labelme_dir / "mapping.csv"
     with mapping_csv.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["rank", "filename", "timestamp", "score", "pred_caution_ratio"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "rank",
+                "filename",
+                "timestamp",
+                "score",
+                "uncertainty_score",
+                "route_impact_score",
+                "class_balance_score",
+                "pred_caution_ratio",
+                "dominant_factor",
+                "explain_json",
+                "explain_png",
+            ],
+        )
         w.writeheader()
         w.writerows(mapping_rows)
 
@@ -401,8 +618,15 @@ def main() -> None:
                 "max_suggest_ratio": args.max_suggest_ratio,
                 "smooth_min_neighbors": args.smooth_min_neighbors,
                 "smooth_iters": args.smooth_iters,
+                "class_balance_target": class_balance_target,
+                "class_balance_target_auto_estimate": auto_target,
+                "class_balance_width": float(args.class_balance_width),
+                "w_uncertainty": float(rows[0]["score_w_uncertainty"]) if rows else 0.55,
+                "w_route_impact": float(rows[0]["score_w_route_impact"]) if rows else 0.30,
+                "w_class_balance": float(rows[0]["score_w_class_balance"]) if rows else 0.15,
                 "ranking_csv": str(ranking_csv),
                 "labelme_dir": str(labelme_dir),
+                "explain_dir": str(explain_dir),
             },
             f,
             ensure_ascii=False,

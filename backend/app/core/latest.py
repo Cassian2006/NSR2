@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import random
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,7 +16,6 @@ import numpy as np
 
 from app.core.config import Settings
 from app.core.copernicus_live import CopernicusLiveError, is_copernicus_configured, pull_latest_env_partial
-from app.core.dataset import get_dataset_service
 from app.core.geo import load_grid_geo
 from app.core.latest_source_health import can_attempt_source, record_source_failure, record_source_success
 
@@ -92,9 +92,23 @@ def _is_materialized(settings: Settings, timestamp: str) -> bool:
     return (folder / "x_stack.npy").exists() and (folder / "blocked_mask.npy").exists()
 
 
-def _nearest_local_timestamp(target_timestamp: str) -> str:
-    service = get_dataset_service()
-    all_ts = service.list_timestamps(month="all")
+def _list_local_timestamps(settings: Settings) -> list[str]:
+    items: list[str] = []
+    root = settings.annotation_pack_root
+    if not root.exists() or not root.is_dir():
+        return items
+    for folder in sorted(root.iterdir()):
+        if folder.is_dir() and (folder / "x_stack.npy").exists() and (folder / "blocked_mask.npy").exists():
+            try:
+                datetime.strptime(folder.name, TIMESTAMP_FMT)
+            except ValueError:
+                continue
+            items.append(folder.name)
+    return items
+
+
+def _nearest_local_timestamp(settings: Settings, target_timestamp: str) -> str:
+    all_ts = _list_local_timestamps(settings)
     if not all_ts:
         raise LatestDataError("No local timestamps available for fallback")
     target_dt = datetime.strptime(target_timestamp, TIMESTAMP_FMT)
@@ -201,7 +215,10 @@ def _with_retries(
             last_exc = exc
             if attempt >= attempts:
                 break
+            if not _is_retryable_exception(exc):
+                break
             delay = wait_base * (2 ** (attempt - 1))
+            delay *= (0.85 + random.random() * 0.30)
             _emit_progress(
                 progress_cb,
                 phase,
@@ -214,6 +231,30 @@ def _with_retries(
     if isinstance(last_exc, LatestDataError):
         raise last_exc
     raise LatestDataError(f"{label} failed after {attempts} attempts: {last_exc}")
+
+
+def _is_retryable_exception(exc: Exception) -> bool:
+    # Authentication/config/schema style errors are usually non-retryable.
+    text = str(exc).lower()
+    non_retry_tokens = [
+        "unsupported date format",
+        "hour must be",
+        "incomplete",
+        "missing arrays",
+        "shape mismatch",
+        "snapshot npz missing required keys",
+        "not a valid npz payload",
+        "no local timestamps available",
+        "auth",
+        "invalid credential",
+        "unauthorized",
+        "forbidden",
+        "http 401",
+        "http 403",
+    ]
+    if any(token in text for token in non_retry_tokens):
+        return False
+    return True
 
 
 def _download_latest_snapshot(
@@ -301,12 +342,13 @@ def _materialize_from_copernicus(
     *,
     settings: Settings,
     timestamp: str,
+    template_timestamp: str | None = None,
     progress_cb: ProgressCB | None = None,
 ) -> dict:
     if not is_copernicus_configured(settings):
         raise LatestDataError("Copernicus account or dataset settings are incomplete")
 
-    base_timestamp = _nearest_local_timestamp(timestamp)
+    base_timestamp = template_timestamp if template_timestamp and _is_materialized(settings, template_timestamp) else _nearest_local_timestamp(settings, timestamp)
     _emit_progress(progress_cb, "prepare", f"Using template grid {base_timestamp}", 10)
     base_dir = settings.annotation_pack_root / base_timestamp
     x_base_path = base_dir / "x_stack.npy"
@@ -407,7 +449,8 @@ def resolve_latest_timestamp(
     timestamp_lock = _get_timestamp_lock(timestamp)
 
     with timestamp_lock:
-        if _is_materialized(settings, timestamp) and not force_refresh:
+        has_existing_target = _is_materialized(settings, timestamp)
+        if has_existing_target and not force_refresh:
             _emit_progress(progress_cb, "resolve", "Using existing local latest snapshot", 70)
             return LatestResolveResult(timestamp=timestamp, source="local_existing", note="already materialized")
 
@@ -420,6 +463,7 @@ def resolve_latest_timestamp(
                     source_meta = _materialize_from_copernicus(
                         settings=settings,
                         timestamp=timestamp,
+                        template_timestamp=timestamp if has_existing_target else None,
                         progress_cb=progress_cb,
                     )
                     record_source_success(COPERNICUS_SOURCE)
@@ -452,7 +496,21 @@ def resolve_latest_timestamp(
         else:
             snapshot_error = "snapshot_not_configured"
 
-        fallback = _nearest_local_timestamp(timestamp)
+        if has_existing_target:
+            _emit_progress(progress_cb, "resolve", "Refresh failed, falling back to stale local snapshot", 94)
+            notes: list[str] = []
+            if copernicus_error:
+                notes.append(f"copernicus_error={copernicus_error}")
+            if snapshot_error:
+                notes.append(f"snapshot_error={snapshot_error}")
+            note = "; ".join(notes) if notes else "latest sources unavailable"
+            return LatestResolveResult(
+                timestamp=timestamp,
+                source="stale_local_existing",
+                note=note,
+            )
+
+        fallback = _nearest_local_timestamp(settings, timestamp)
         _emit_progress(progress_cb, "resolve", f"Fallback to nearest local timestamp: {fallback}", 94)
 
         notes: list[str] = []

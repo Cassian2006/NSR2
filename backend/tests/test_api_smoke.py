@@ -250,7 +250,13 @@ def test_latest_plan_fallback(client: TestClient) -> None:
     body = resp.json()
     assert body["route_geojson"]["geometry"]["type"] == "LineString"
     assert "resolved" in body
-    assert body["resolved"]["source"] in {"local_existing", "remote_snapshot", "nearest_local_fallback", "copernicus_live"}
+    assert body["resolved"]["source"] in {
+        "local_existing",
+        "stale_local_existing",
+        "remote_snapshot",
+        "nearest_local_fallback",
+        "copernicus_live",
+    }
 
 
 def test_latest_progress_endpoint(client: TestClient) -> None:

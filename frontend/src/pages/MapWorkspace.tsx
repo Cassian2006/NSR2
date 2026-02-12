@@ -4,6 +4,9 @@ import { AlertCircle, CheckCircle2, Cpu, Navigation } from "lucide-react";
 import { toast } from "sonner";
 
 import {
+  getActiveReviewItems,
+  getActiveReviewRuns,
+  postActiveReviewDecision,
   getErrorMessage,
   getLayers,
   getLatestProgress,
@@ -15,6 +18,8 @@ import {
   runInference,
   setCopernicusConfig,
   uploadGalleryImage,
+  type ActiveReviewItem,
+  type ActiveReviewRun,
   type InferResponse,
   type RoutePlanResponse,
 } from "../api/client";
@@ -114,6 +119,12 @@ export default function MapWorkspace() {
   });
   const [copernicusConfigured, setCopernicusConfigured] = useState(false);
   const [latestMeta, setLatestMeta] = useState<Record<string, unknown> | null>(null);
+  const [reviewRuns, setReviewRuns] = useState<ActiveReviewRun[]>([]);
+  const [reviewRunId, setReviewRunId] = useState("");
+  const [reviewItems, setReviewItems] = useState<ActiveReviewItem[]>([]);
+  const [reviewCursor, setReviewCursor] = useState(0);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewSaving, setReviewSaving] = useState(false);
   const [latestProgress, setLatestProgress] = useState({
     progressId: "",
     status: "idle",
@@ -150,6 +161,57 @@ export default function MapWorkspace() {
     mql.addListener(apply);
     return () => mql.removeListener(apply);
   }, []);
+
+  const refreshActiveReviewRuns = useCallback(async () => {
+    try {
+      const res = await getActiveReviewRuns();
+      setReviewRuns(res.runs);
+      setReviewRunId((prev) => {
+        if (prev && res.runs.some((r) => r.run_id === prev)) return prev;
+        return res.runs[0]?.run_id ?? "";
+      });
+    } catch (error) {
+      console.warn("active review runs unavailable", error);
+      setReviewRuns([]);
+      setReviewRunId("");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshActiveReviewRuns();
+  }, [refreshActiveReviewRuns]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadReviewItems() {
+      if (!reviewRunId) {
+        setReviewItems([]);
+        setReviewCursor(0);
+        return;
+      }
+      setReviewLoading(true);
+      try {
+        const res = await getActiveReviewItems(reviewRunId, 20);
+        if (!active) return;
+        setReviewItems(res.items);
+        setReviewCursor((prev) => {
+          if (res.items.length === 0) return 0;
+          return Math.max(0, Math.min(prev, res.items.length - 1));
+        });
+      } catch (error) {
+        if (!active) return;
+        console.warn("active review items unavailable", error);
+        setReviewItems([]);
+        setReviewCursor(0);
+      } finally {
+        if (active) setReviewLoading(false);
+      }
+    }
+    void loadReviewItems();
+    return () => {
+      active = false;
+    };
+  }, [reviewRunId]);
 
   useEffect(() => {
     return () => {
@@ -265,6 +327,11 @@ export default function MapWorkspace() {
     }),
     [routeMetrics]
   );
+
+  const selectedReviewItem = useMemo(() => {
+    if (!reviewItems.length) return null;
+    return reviewItems[Math.max(0, Math.min(reviewCursor, reviewItems.length - 1))] ?? null;
+  }, [reviewCursor, reviewItems]);
 
   const latestPhaseText = useMemo(() => {
     const phase = latestProgress.phase || "unknown";
@@ -529,6 +596,41 @@ export default function MapWorkspace() {
       toast.error(`${t("toast.inferFailed")}: ${getErrorMessage(error)}`, { id: "run-infer" });
     } finally {
       setInferring(false);
+    }
+  };
+
+  const handleSaveReviewDecision = async (decision: "accepted" | "needs_revision") => {
+    if (!selectedReviewItem || !reviewRunId) return;
+    setReviewSaving(true);
+    try {
+      await postActiveReviewDecision({
+        run_id: reviewRunId,
+        timestamp: selectedReviewItem.timestamp,
+        decision,
+      });
+      setReviewItems((prev) =>
+        prev.map((item) =>
+          item.timestamp === selectedReviewItem.timestamp
+            ? {
+                ...item,
+                decision: {
+                  ...(item.decision ?? {}),
+                  decision,
+                  updated_at: new Date().toISOString(),
+                },
+              }
+            : item
+        )
+      );
+      toast.success(decision === "accepted" ? "已接受建议" : "已标记为需局部修订");
+      if (decision === "accepted" && reviewCursor < reviewItems.length - 1) {
+        setReviewCursor((prev) => prev + 1);
+      }
+      await refreshActiveReviewRuns();
+    } catch (error) {
+      toast.error(`保存建议状态失败: ${getErrorMessage(error)}`);
+    } finally {
+      setReviewSaving(false);
     }
   };
 
@@ -931,6 +1033,115 @@ export default function MapWorkspace() {
                       ) : null}
                     </div>
                   ) : null}
+
+                  <div className="rounded-md border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>主动学习标注建议</Label>
+                      {reviewLoading ? <span className="text-xs text-slate-500">加载中...</span> : null}
+                    </div>
+                    {reviewRuns.length > 0 ? (
+                      <Select value={reviewRunId} onValueChange={setReviewRunId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择建议批次" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {reviewRuns.map((run) => (
+                            <SelectItem key={run.run_id} value={run.run_id}>
+                              {run.run_id} ({run.accepted_count}/{run.mapping_count})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="text-xs text-slate-500">暂无建议批次（先运行 active_learning_suggest）</div>
+                    )}
+
+                    {selectedReviewItem ? (
+                      <div className="rounded-md border border-violet-100 bg-white p-2 space-y-2 text-xs text-slate-700">
+                        <div className="flex items-center justify-between">
+                          <div className="font-medium">
+                            #{selectedReviewItem.rank} {selectedReviewItem.timestamp}
+                          </div>
+                          <div className="text-violet-700">score {selectedReviewItem.score.toFixed(3)}</div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>不确定性：{selectedReviewItem.uncertainty_score.toFixed(3)}</div>
+                          <div>路线影响：{selectedReviewItem.route_impact_score.toFixed(3)}</div>
+                          <div>类平衡：{selectedReviewItem.class_balance_score.toFixed(3)}</div>
+                          <div>预测谨慎占比：{(selectedReviewItem.pred_caution_ratio * 100).toFixed(1)}%</div>
+                        </div>
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-2 space-y-1">
+                          <div className="font-medium text-slate-800">建议原因卡片</div>
+                          <div>主导因素：{selectedReviewItem.dominant_factor || "unknown"}</div>
+                          {(() => {
+                            const exp = selectedReviewItem.explanation as Record<string, unknown>;
+                            const factors = (exp?.factors_norm ?? {}) as Record<string, unknown>;
+                            const rows = [
+                              ["ice_contribution", "冰贡献"],
+                              ["wave_contribution", "浪贡献"],
+                              ["wind_contribution", "风贡献"],
+                              ["ais_deviation", "AIS 偏离"],
+                              ["historical_misclassification_risk", "历史误判风险"],
+                            ] as const;
+                            return rows.map(([key, label]) => {
+                              const vRaw = factors?.[key];
+                              const v = typeof vRaw === "number" ? vRaw : Number(vRaw ?? 0);
+                              return (
+                                <div key={key} className="flex items-center justify-between">
+                                  <span>{label}</span>
+                                  <span>{Number.isFinite(v) ? (v * 100).toFixed(1) : "0.0"}%</span>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          当前状态：{selectedReviewItem.decision?.decision === "accepted"
+                            ? "已接受"
+                            : selectedReviewItem.decision?.decision === "needs_revision"
+                              ? "需局部修订"
+                              : "未处理"}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="flex-1"
+                            disabled={reviewSaving}
+                            onClick={() => void handleSaveReviewDecision("accepted")}
+                          >
+                            一键接受
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1"
+                            disabled={reviewSaving}
+                            onClick={() => void handleSaveReviewDecision("needs_revision")}
+                          >
+                            需局部修订
+                          </Button>
+                        </div>
+                        <div className="flex justify-between">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={reviewCursor <= 0}
+                            onClick={() => setReviewCursor((prev) => Math.max(0, prev - 1))}
+                          >
+                            上一条
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={reviewCursor >= reviewItems.length - 1}
+                            onClick={() => setReviewCursor((prev) => Math.min(reviewItems.length - 1, prev + 1))}
+                          >
+                            下一条
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </CardContent>
               </Card>
             </div>

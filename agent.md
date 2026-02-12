@@ -473,3 +473,75 @@ pm run build in frontend (pass).
 - 2026-02-11T15:20:53Z | Rewrote readme.md to clean UTF-8 project snapshot: current feature completeness, data-quality status (WARN), deployment notes (Render/NAS), and submission gate rules.
 - 2026-02-11T15:20:53Z | Pre-submit validation: python -m pytest -q in backend -> 69 passed; npm run build in frontend succeeded.
 - 2026-02-11T15:21:34Z | Created commit ad07a5e (map rendering stability + deployment defaults + data-quality rule tuning + README refresh) and pushed to origin/main.
+- 2026-02-11T15:29:29Z | Backfilled historical unet caches across all timestamps via run_unet_inference: processed=493, new_pred=382, new_uncertainty=411, errors=0 (outputs/pred/unet_v1).
+- 2026-02-11T15:29:29Z | Post-backfill quality check: auxiliary_layers_coverage switched to pass (pred=493/493, uncertainty=493/493); overall dataset quality status now warn with only numeric_quality_sampled remaining.
+- 2026-02-11T15:36:45Z | Latest resilience upgrade in backend/app/core/latest.py: local timestamp scan now uses passed settings (no global dataset coupling), retry loop adds jittered exponential backoff and non-retryable fast-fail classification, and force_refresh failure now falls back to stale local target snapshot (source=stale_local_existing) before nearest-local fallback.
+- 2026-02-11T15:36:45Z | Added regression tests backend/tests/test_latest_resilience.py (stale-local fallback, settings-scoped nearest fallback, non-retryable retry stop) and updated backend/tests/test_api_smoke.py latest source set.
+- 2026-02-11T15:36:45Z | Validation: python -m pytest -q tests/test_latest_resilience.py -> 3 passed; python -m pytest -q tests/test_api_smoke.py::test_latest_plan_fallback -> 1 passed; python -m pytest -q in backend -> 72 passed.
+
+- 2026-02-11T15:46:47Z | Added NAS runtime inspection script usage to readme.md, including startup command, checked endpoints/layers, and exit-code contract.
+- 2026-02-11T15:46:47Z | Hardened backend/scripts/nas_runtime_healthcheck.py with --warn-exit-zero for Docker/DSM healthcheck integration without failing container on warning-only status.
+- 2026-02-11T15:46:47Z | Added backend/tests/test_nas_runtime_healthcheck.py and validated healthcheck behavior (pass + low sample_count fail); validation: python -m pytest -q tests/test_nas_runtime_healthcheck.py tests/test_latest_resilience.py -> 5 passed; python -m pytest -q -> 74 passed.
+- 2026-02-11T23:22:12Z | Updated readme.md: added section '???????????? + ???' with three upgrade tracks (robust risk-aware planning, explainable active learning loop, dynamic digital-twin incremental replanning).
+- 2026-02-11T23:25:34Z | Updated readme.md with Direction-B execution backlog (B1-B10), each item includes implementation scope and test acceptance criteria for step-by-step delivery.
+
+- 2026-02-11T23:30:05Z | B1 completed: upgraded backend/scripts/qc_unet_manifest.py with annotation QC checks (empty caution annotation, caution/blocked overlap conflict, tiny caution regions, invalid labels via sample QC) and dual output reports (json + md).
+- 2026-02-11T23:30:05Z | Added QC tunables: --out-md, --min-component-pixels, --max-tiny-components, --max-tiny-components-ratio, --max-conflict-ratio, and adjusted default --max-nan-ratio to 0.95 for annotation-focused screening.
+- 2026-02-11T23:30:05Z | Added tests in backend/tests/test_train_quality.py for annotation QC conflict/empty/tiny-region detection; validation: python -m pytest -q tests/test_train_quality.py -> 4 passed; python scripts/qc_unet_manifest.py -> rows=152 ok=32 bad=120, reports generated at data/processed/unet_manifest_quality_report.json and .md.
+- 2026-02-11T23:30:05Z | Updated readme.md B1 checklist status to done ([x] implementation + [x] acceptance).
+
+- 2026-02-11T23:34:08Z | B2 completed in backend/scripts/active_learning_suggest.py: introduced explicit composite ranking with uncertainty + route_impact + class_balance components, configurable weights/targets, robust normalization, and decomposition fields exported in ranking.csv/mapping.csv/summary.json.
+- 2026-02-11T23:34:08Z | Added B2 tests in backend/tests/test_active_learning_suggest.py for three-component scoring output and class-balance preference behavior.
+- 2026-02-11T23:34:08Z | B2 acceptance run: python -m pytest -q tests/test_active_learning_suggest.py -> 4 passed; python scripts/active_learning_suggest.py --top-k 20 -> ranked=341, topk=20, outputs at outputs/active_learning/active_20260211_233302/.
+- 2026-02-11T23:34:08Z | Updated readme.md B2 checklist status to done ([x] implementation + [x] acceptance).
+
+- 2026-02-11T23:37:34Z | B3 completed: added backend/app/model/active_explain.py for per-sample explanation decomposition (ice/wave/wind contributions, AIS deviation, historical misclassification risk proxy), JSON schema, and explanation card PNG rendering.
+- 2026-02-11T23:37:34Z | Integrated explanations into backend/scripts/active_learning_suggest.py: exports explanation snapshots for each top-k sample to outputs/active_learning/<run>/explanations/*_explain.json and *_explain.png; mapping.csv now includes dominant_factor and explanation file paths.
+- 2026-02-11T23:37:34Z | Added tests backend/tests/test_active_explain.py (non-negative contributions, normalized sum consistency, required fields, PNG render readability) and validation: python -m pytest -q tests/test_active_explain.py tests/test_active_learning_suggest.py -> 6 passed.
+- 2026-02-11T23:37:34Z | B3 acceptance run: python scripts/active_learning_suggest.py --top-k 20 -> outputs/active_learning/active_20260211_233636; sampled 5 explanation files and verified JSON parse + PNG readable.
+- 2026-02-11T23:37:34Z | Updated readme.md B3 checklist status to done ([x] implementation + [x] acceptance).
+
+- 2026-02-11T23:42:53Z | B4 completed in backend/scripts/prepare_unet_annotation_pack.py: added visual assets generation per timestamp (quicklook_riskhint.png, quicklook_landmask.png, quicklook_blocked_overlay.png) and metadata fields for these assets.
+- 2026-02-11T23:42:53Z | Implemented batch export + resume labeling workflow in prepare_unet_annotation_pack.py: --export-batches, --batch-size, --batches-root, --resume-batches, --only-unlabeled-batches, --max-batches; outputs batch_xxx/mapping.csv + meta.json + README and maintains label_batches/batch_state.json + batches_index.csv.
+- 2026-02-11T23:42:53Z | Added regression tests backend/tests/test_prepare_annotation_pack_batches.py (riskhint render sanity + batch mapping/file consistency + resume behavior).
+- 2026-02-11T23:42:53Z | Validation for B4: python -m pytest -q tests/test_prepare_annotation_pack_batches.py -> 2 passed; python scripts/prepare_unet_annotation_pack.py -> prepared=492; python scripts/prepare_unet_annotation_pack.py --export-batches --batch-size 20 --only-unlabeled-batches --resume-batches -> created_batches=17 exported=340; batch consistency check -> issues=0.
+- 2026-02-11T23:42:53Z | Updated readme.md B4 checklist status to done ([x] implementation + [x] acceptance).
+
+- 2026-02-11T23:51:05Z | B5 backend completed: added active review persistence APIs via backend/app/api/routes_active_review.py and backend/app/core/active_review.py (list runs, list items with explanation+decision, save accepted/needs_revision decisions to outputs/active_learning/review_state/<run_id>.json).
+- 2026-02-11T23:51:05Z | B5 frontend completed in frontend/src/pages/MapWorkspace.tsx + frontend/src/api/client.ts: added annotation suggestion panel with run selector, reason card (factor contributions), one-click actions (accepted/needs_revision), and persisted state reflection in UI.
+- 2026-02-11T23:51:05Z | Added backend API regression test backend/tests/test_active_review_api.py (runs/items/decision roundtrip).
+- 2026-02-11T23:51:05Z | Validation: python -m pytest -q tests/test_active_review_api.py tests/test_api_smoke.py::test_healthz tests/test_api_smoke.py::test_layers -> 3 passed; cd frontend && npm run build -> passed; python -m pytest -q (backend) -> 83 passed.
+- 2026-02-11T23:51:05Z | Updated readme.md B5 checklist status to done ([x] implementation + [x] acceptance).
+
+- 2026-02-11T23:55:15.9809012+00:00 | B6 completed: added backend/app/model/train_config.py for focal+dice loss presets (none/balanced/caution_focus/blocked_focus), class-weight mode resolution (auto/manual/uniform), and strict class-weight parsing.
+- 2026-02-11T23:55:15.9809012+00:00 | Integrated training config switching into backend/scripts/train_unet_quick.py via --loss-preset, --class-weight-mode, --class-weights; summary.json now records effective loss config, preset source, and auto/manual class-weight details.
+- 2026-02-11T23:55:15.9809012+00:00 | Added tests backend/tests/test_train_config.py for loss preset application, class-weight mode handling, and invalid manual weight parsing.
+- 2026-02-11T23:55:15.9809012+00:00 | Validation: python -m pytest -q tests/test_losses.py tests/test_train_config.py -> 10 passed; training smoke run succeeded with python scripts/train_unet_quick.py --epochs 1 --steps-per-epoch 2 --val-steps 1 --batch-size 2 --patch-size 128 --out-dir outputs/train_runs/b6_smoke --loss focal_dice --loss-preset caution_focus --class-weight-mode uniform --no-qc-drop.
+- 2026-02-11T23:59:00.2492393+00:00 | Regression validation after B6 integration: python -m pytest -q in backend -> 92 passed.
+
+- 2026-02-12T00:02:27.1894533+00:00 | B7 completed: enhanced hard replay in backend/app/model/train_quality.py with hard_target_ratio + hard_max_ratio controls, returned hard_mask, and added weighted sampling helper sample_indices_from_weights for distribution validation.
+- 2026-02-12T00:02:27.1894533+00:00 | Updated backend/scripts/train_unet_quick.py: new args --hard-sample-target-ratio and --hard-sample-max-ratio, wired hard_flags into training dataset, and added runtime metric train_hard_hit_rate in epoch logs and summary metrics.
+- 2026-02-12T00:02:27.1894533+00:00 | Added tests backend/tests/test_train_hard_replay_runtime.py and extended backend/tests/test_train_quality.py for sampling distribution and replay ratio cap assertions.
+- 2026-02-12T00:02:27.1894533+00:00 | Validation: python -m pytest -q tests/test_train_quality.py tests/test_train_hard_replay_runtime.py -> 6 passed; smoke run success with train_hard_hit_rate in log via python scripts/train_unet_quick.py --epochs 1 --steps-per-epoch 2 --val-steps 1 --batch-size 2 --patch-size 128 --out-dir outputs/train_runs/b7_smoke --loss focal_dice --loss-preset caution_focus --class-weight-mode uniform --hard-sample-quantile 0.7 --hard-sample-boost 3.0 --hard-sample-target-ratio 0.55 --hard-sample-max-ratio 0.65 --no-qc-drop.
+- 2026-02-12T00:06:09.0221760+00:00 | Regression validation after B7: python -m pytest -q in backend -> 94 passed.
+
+- 2026-02-12T00:13:44.4620790+00:00 | B8 completed: added backend/app/model/uncertainty_calibration.py with temperature-scaling calibration, ECE/Brier/NLL metrics, reliability bins, and uncertainty-threshold suggestion generator.
+- 2026-02-12T00:13:44.4620790+00:00 | Added backend/scripts/calibrate_uncertainty.py to build calibration reports from labeled manifest + cached unet_pred/unet_uncertainty, outputting JSON/Markdown with before/after metrics and threshold recommendations.
+- 2026-02-12T00:13:44.4620790+00:00 | Added backend/tests/test_uncertainty_calibration.py covering metric tracking/improvement behavior, reliability-bin integrity, and threshold suggestion monotonicity.
+- 2026-02-12T00:13:44.4620790+00:00 | B8 acceptance artifacts: outputs/calibration/uncertainty_calibration_20260212_001002.json and .md generated; metrics trace ece 0.230831->0.230831, brier 0.166617->0.166617, nll 0.524425->0.524425, improved=brier (tracked via identity-guard calibration fallback).
+- 2026-02-12T00:13:44.4620790+00:00 | Validation: python -m pytest -q tests/test_uncertainty_calibration.py -> 4 passed; python -m pytest -q in backend -> 98 passed.
+
+- 2026-02-12T00:22:16.7477317+00:00 | B9 completed: added backend/scripts/report_closed_loop_eval.py for unified closed-loop before/after evaluation report (train val_iou, planner route_safety, route_length_delta_km, inference_time_delta_ms) with thesis-ready markdown template and conclusion paragraph.
+- 2026-02-12T00:22:16.7477317+00:00 | Added robust input auto-discovery for train summaries and planner benchmark JSON from outputs/ and backend/outputs/, plus checkpoint path resolution across relative path variants.
+- 2026-02-12T00:22:16.7477317+00:00 | Added backend/tests/test_closed_loop_report.py covering route aggregation math and closed-loop delta/conclusion generation in skip-inference mode.
+- 2026-02-12T00:22:16.7477317+00:00 | B9 acceptance chain passed: python scripts/report_data_quality.py --sample-limit 24; python scripts/report_closed_loop_eval.py --before-train-summary outputs/train_runs/b6_smoke/summary.json --after-train-summary outputs/train_runs/b7_smoke/summary.json --before-benchmark outputs/benchmarks/planner_benchmark_20260211_003630.json --after-benchmark outputs/benchmarks/planner_benchmark_20260211_003702.json --mode static --planner astar --infer-samples 2.
+- 2026-02-12T00:22:16.7477317+00:00 | Generated artifacts: outputs/closed_loop/closed_loop_report_20260212_001838.json + .md, outputs/qa/dataset_quality_20260212_001836.json + .md.
+- 2026-02-12T00:22:16.7477317+00:00 | Validation: python -m pytest -q tests/test_closed_loop_report.py tests/test_uncertainty_calibration.py -> 6 passed; python -m pytest -q in backend -> 100 passed.
+
+- 2026-02-12T00:32:39.0066804+00:00 | B10 completed: added backend/scripts/run_closed_loop_pipeline.py implementing one-command closed loop (qc -> suggest -> pack -> train -> eval -> report) with per-stage state tracking at outputs/pipelines/<run_id>/state.json.
+- 2026-02-12T00:32:39.0066804+00:00 | Added retry and resume mechanics: suggest/train stages support configurable retries (--retries-suggest/--retries-train), and --resume skips already-successful stages and continues from failed stage.
+- 2026-02-12T00:32:39.0066804+00:00 | Added pipeline tests in backend/tests/test_closed_loop_pipeline.py (retry-then-success, resume-skip, run-level resume behavior).
+- 2026-02-12T00:32:39.0066804+00:00 | Fixed backend/scripts/benchmark_planners.py import path bootstrap (sys.path insert) so subprocess invocation from backend root works without PYTHONPATH.
+- 2026-02-12T00:32:39.0066804+00:00 | B10 smoke acceptance run succeeded with run-id=b10_smoke; artifacts generated under backend/outputs/pipelines/b10_smoke (qc report, active suggestions, label batch export, train summary, benchmark JSON, closed-loop report JSON/MD).
+- 2026-02-12T00:32:39.0066804+00:00 | Resume verification: reran same command with --resume and observed immediate success without re-executing completed stages.
+- 2026-02-12T00:32:39.0066804+00:00 | Validation: python -m pytest -q tests/test_closed_loop_pipeline.py tests/test_closed_loop_report.py -> 5 passed; python -m pytest -q in backend -> 103 passed.

@@ -95,10 +95,12 @@ def build_hard_sample_weights(
     *,
     hard_quantile: float = 0.8,
     hard_boost: float = 2.0,
-) -> tuple[np.ndarray, dict[str, float | int]]:
+    hard_target_ratio: float = 0.0,
+    hard_max_ratio: float = 0.8,
+) -> tuple[np.ndarray, dict[str, float | int], np.ndarray]:
     paths = list(y_paths)
     if not paths:
-        return np.zeros((0,), dtype=np.float64), {"hard_count": 0, "hard_threshold": 0.0}
+        return np.zeros((0,), dtype=np.float64), {"hard_count": 0, "hard_threshold": 0.0}, np.zeros((0,), dtype=bool)
 
     scores = np.zeros((len(paths),), dtype=np.float64)
     for i, path in enumerate(paths):
@@ -115,7 +117,26 @@ def build_hard_sample_weights(
     boost = max(1.0, float(hard_boost))
     if hard_mask.any():
         weights[hard_mask] *= boost
+    hard_weight_ratio_pre = float(weights[hard_mask].sum() / max(1e-12, float(weights.sum())))
+
+    # Optional ratio control to avoid over-replaying hard pool.
+    target = float(np.clip(hard_target_ratio, 0.0, 1.0))
+    cap = float(np.clip(hard_max_ratio, 0.0, 1.0))
+    if hard_mask.any() and (~hard_mask).any():
+        hard_sum = float(weights[hard_mask].sum())
+        easy_sum = float(weights[~hard_mask].sum())
+        if target > 0.0:
+            weights[hard_mask] *= target / max(1e-12, hard_sum)
+            weights[~hard_mask] *= (1.0 - target) / max(1e-12, easy_sum)
+            hard_sum = float(weights[hard_mask].sum())
+            easy_sum = float(weights[~hard_mask].sum())
+        hard_ratio_now = hard_sum / max(1e-12, hard_sum + easy_sum)
+        if hard_ratio_now > cap:
+            weights[hard_mask] *= cap / max(1e-12, hard_sum)
+            weights[~hard_mask] *= (1.0 - cap) / max(1e-12, easy_sum)
+
     weights = weights / max(1e-12, float(weights.sum()))
+    hard_weight_ratio = float(weights[hard_mask].sum()) if hard_mask.any() else 0.0
 
     meta: dict[str, float | int] = {
         "hard_count": int(hard_mask.sum()),
@@ -124,5 +145,28 @@ def build_hard_sample_weights(
         "max_score": float(scores.max(initial=0.0)),
         "hard_quantile": q,
         "hard_boost": boost,
+        "hard_target_ratio": target,
+        "hard_max_ratio": cap,
+        "hard_weight_ratio_pre": hard_weight_ratio_pre,
+        "hard_weight_ratio": hard_weight_ratio,
     }
-    return weights, meta
+    return weights, meta, hard_mask
+
+
+def sample_indices_from_weights(
+    probs: np.ndarray,
+    n_draws: int,
+    *,
+    seed: int = 0,
+) -> np.ndarray:
+    p = np.asarray(probs, dtype=np.float64)
+    if p.ndim != 1 or p.size == 0:
+        return np.zeros((0,), dtype=np.int64)
+    p = np.clip(p, 0.0, None)
+    total = float(p.sum())
+    if total <= 0:
+        p = np.ones_like(p, dtype=np.float64) / float(len(p))
+    else:
+        p = p / total
+    rng = np.random.default_rng(seed)
+    return rng.choice(len(p), size=max(0, int(n_draws)), replace=True, p=p).astype(np.int64)

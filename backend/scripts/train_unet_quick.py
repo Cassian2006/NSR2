@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.model.losses import FocalDiceLoss
+from app.model.train_config import resolve_class_weights, resolve_loss_hparams
 from app.model.tiny_unet import TinyUNet
 from app.model.train_quality import build_hard_sample_weights, evaluate_sample_quality
 
@@ -67,11 +68,28 @@ def parse_args() -> argparse.Namespace:
         default="focal_dice",
         help="Training loss type.",
     )
+    p.add_argument(
+        "--loss-preset",
+        choices=["none", "balanced", "caution_focus", "blocked_focus"],
+        default="none",
+        help="Preset bundle for focal+dice loss hyperparameters. 'none' keeps explicit CLI values.",
+    )
     p.add_argument("--focal-gamma", type=float, default=2.0)
     p.add_argument("--dice-smooth", type=float, default=1.0)
     p.add_argument("--loss-lambda-ce", type=float, default=0.4)
     p.add_argument("--loss-lambda-focal", type=float, default=0.3)
     p.add_argument("--loss-lambda-dice", type=float, default=0.3)
+    p.add_argument(
+        "--class-weight-mode",
+        choices=["auto", "manual", "uniform"],
+        default="auto",
+        help="auto=inverse-frequency from training masks; manual=use --class-weights; uniform=[1,1,1].",
+    )
+    p.add_argument(
+        "--class-weights",
+        default="",
+        help="Comma-separated class weights when --class-weight-mode=manual, e.g. 0.8,1.4,1.8",
+    )
     p.add_argument(
         "--qc-min-foreground-ratio",
         type=float,
@@ -100,6 +118,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=2.0,
         help="Weight boost multiplier for hard samples.",
+    )
+    p.add_argument(
+        "--hard-sample-target-ratio",
+        type=float,
+        default=0.6,
+        help="Target replay ratio for hard pool in training sampling (0 disables explicit targeting).",
+    )
+    p.add_argument(
+        "--hard-sample-max-ratio",
+        type=float,
+        default=0.8,
+        help="Upper bound for hard pool sampling ratio after weighting.",
     )
     return p.parse_args()
 
@@ -254,6 +284,7 @@ class RandomPatchDataset(IterableDataset):
         aug_noise_std: float = 0.03,
         aug_gamma_max: float = 0.15,
         item_probs: np.ndarray | None = None,
+        hard_flags: np.ndarray | None = None,
     ) -> None:
         self.items = items
         self.mean = mean[:, None, None]
@@ -272,6 +303,10 @@ class RandomPatchDataset(IterableDataset):
             self.item_probs = (p / total) if total > 0 else None
         else:
             self.item_probs = None
+        if hard_flags is not None and len(hard_flags) == len(items):
+            self.hard_flags = np.asarray(hard_flags, dtype=np.float32)
+        else:
+            self.hard_flags = np.zeros((len(items),), dtype=np.float32)
 
     def _sample_patch_origin(
         self,
@@ -349,7 +384,7 @@ class RandomPatchDataset(IterableDataset):
             if self.augment:
                 xp, yp = self._apply_augment(xp, yp, rng)
 
-            yield torch.from_numpy(xp), torch.from_numpy(yp)
+            yield torch.from_numpy(xp), torch.from_numpy(yp), torch.tensor(self.hard_flags[idx], dtype=torch.float32)
 
 
 def run_epoch(
@@ -369,9 +404,19 @@ def run_epoch(
     i_inter = np.zeros(3, dtype=np.float64)
     i_union = np.zeros(3, dtype=np.float64)
 
-    for xb, yb in loader:
+    hard_hits = 0.0
+    hard_total = 0
+    for batch in loader:
+        if len(batch) == 3:
+            xb, yb, hb = batch
+        else:
+            xb, yb = batch  # type: ignore[misc]
+            hb = None
         xb = xb.to(device, non_blocking=True)
         yb = yb.to(device, non_blocking=True)
+        if hb is not None:
+            hard_hits += float(hb.sum().item())
+            hard_total += int(hb.numel())
 
         logits = model(xb)
         loss = criterion(logits, yb)
@@ -403,6 +448,7 @@ def run_epoch(
         "iou_caution": float(iou[1]),
         "iou_blocked": float(iou[2]),
         "miou": float(np.nanmean(iou)),
+        "hard_hit_rate": float(hard_hits / max(1, hard_total)),
     }
 
 
@@ -441,32 +487,49 @@ def main() -> None:
         train_items = train_items[1:] if len(train_items) > 1 else train_items
 
     mean, std = estimate_channel_stats(train_items, stride=8)
-    class_weights = estimate_class_weights(train_items, stride=4)
+    auto_class_weights = estimate_class_weights(train_items, stride=4)
+    class_weights, class_weight_source = resolve_class_weights(
+        mode=args.class_weight_mode,
+        auto_weights=auto_class_weights,
+        manual_raw=args.class_weights,
+    )
+    loss_cfg = resolve_loss_hparams(
+        loss=args.loss,
+        preset=args.loss_preset,
+        focal_gamma=args.focal_gamma,
+        dice_smooth=args.dice_smooth,
+        lambda_ce=args.loss_lambda_ce,
+        lambda_focal=args.loss_lambda_focal,
+        lambda_dice=args.loss_lambda_dice,
+    )
 
     sample_x = np.load(train_items[0].x_path, mmap_mode="r")
     in_channels = int(sample_x.shape[0])
 
-    hard_probs, hard_meta = build_hard_sample_weights(
+    hard_probs, hard_meta, hard_mask = build_hard_sample_weights(
         [it.y_path for it in train_items],
         hard_quantile=args.hard_sample_quantile,
         hard_boost=args.hard_sample_boost,
+        hard_target_ratio=args.hard_sample_target_ratio,
+        hard_max_ratio=args.hard_sample_max_ratio,
     )
+    hard_flags = hard_mask.astype(np.float32)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TinyUNet(in_channels=in_channels, n_classes=3, base=24).to(device)
     class_weights_t = torch.tensor(class_weights, device=device)
-    if args.loss == "ce":
+    if str(loss_cfg["loss"]) == "ce":
         criterion: nn.Module = nn.CrossEntropyLoss(weight=class_weights_t)
     else:
         criterion = FocalDiceLoss(
             num_classes=3,
             class_weights=class_weights_t,
-            focal_gamma=args.focal_gamma,
+            focal_gamma=float(loss_cfg["focal_gamma"]),
             focal_alpha=(class_weights_t / class_weights_t.sum().clamp_min(1e-8)),
-            dice_smooth=args.dice_smooth,
-            lambda_ce=args.loss_lambda_ce,
-            lambda_focal=args.loss_lambda_focal,
-            lambda_dice=args.loss_lambda_dice,
+            dice_smooth=float(loss_cfg["dice_smooth"]),
+            lambda_ce=float(loss_cfg["lambda_ce"]),
+            lambda_focal=float(loss_cfg["lambda_focal"]),
+            lambda_dice=float(loss_cfg["lambda_dice"]),
         )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -482,6 +545,7 @@ def main() -> None:
         aug_noise_std=args.aug_noise_std,
         aug_gamma_max=args.aug_gamma_max,
         item_probs=hard_probs,
+        hard_flags=hard_flags,
     )
     val_ds = RandomPatchDataset(
         items=val_items,
@@ -494,6 +558,7 @@ def main() -> None:
         focus_caution_prob=0.0,
         aug_noise_std=0.0,
         aug_gamma_max=0.0,
+        hard_flags=None,
     )
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, num_workers=args.num_workers)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, num_workers=args.num_workers)
@@ -516,11 +581,13 @@ def main() -> None:
             "val_miou": va["miou"],
             "val_iou_caution": va["iou_caution"],
             "val_iou_blocked": va["iou_blocked"],
+            "train_hard_hit_rate": tr["hard_hit_rate"],
         }
         metrics.append(row)
         print(
             f"epoch={epoch} train_loss={row['train_loss']:.4f} val_loss={row['val_loss']:.4f} "
-            f"val_miou={row['val_miou']:.4f} val_iou_caution={row['val_iou_caution']:.4f}"
+            f"val_miou={row['val_miou']:.4f} val_iou_caution={row['val_iou_caution']:.4f} "
+            f"train_hard_hit_rate={row['train_hard_hit_rate']:.3f}"
         )
         torch.save({"model": model.state_dict(), "epoch": epoch}, last_path)
         if row["val_loss"] < best_val:
@@ -541,20 +608,27 @@ def main() -> None:
         "batch_size": args.batch_size,
         "patch_size": args.patch_size,
         "lr": args.lr,
-        "loss": args.loss,
-        "focal_gamma": args.focal_gamma,
-        "dice_smooth": args.dice_smooth,
-        "loss_lambda_ce": args.loss_lambda_ce,
-        "loss_lambda_focal": args.loss_lambda_focal,
-        "loss_lambda_dice": args.loss_lambda_dice,
+        "loss": str(loss_cfg["loss"]),
+        "loss_preset": str(loss_cfg["loss_preset"]),
+        "focal_gamma": float(loss_cfg["focal_gamma"]),
+        "dice_smooth": float(loss_cfg["dice_smooth"]),
+        "loss_lambda_ce": float(loss_cfg["lambda_ce"]),
+        "loss_lambda_focal": float(loss_cfg["lambda_focal"]),
+        "loss_lambda_dice": float(loss_cfg["lambda_dice"]),
+        "class_weight_mode": args.class_weight_mode,
+        "class_weight_source": class_weight_source,
+        "class_weights_manual_raw": args.class_weights,
         "focus_caution_prob": args.focus_caution_prob,
         "aug_noise_std": args.aug_noise_std,
         "aug_gamma_max": args.aug_gamma_max,
         "hard_sample_quantile": args.hard_sample_quantile,
         "hard_sample_boost": args.hard_sample_boost,
+        "hard_sample_target_ratio": args.hard_sample_target_ratio,
+        "hard_sample_max_ratio": args.hard_sample_max_ratio,
         "hard_sample_meta": hard_meta,
         "in_channels": in_channels,
         "class_weights": class_weights.tolist(),
+        "class_weights_auto_estimated": auto_class_weights.tolist(),
         "norm_mean": mean.tolist(),
         "norm_std": std.tolist(),
         "best_val_loss": best_val,

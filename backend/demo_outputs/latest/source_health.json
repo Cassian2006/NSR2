@@ -1,0 +1,6 @@
+{
+  "updated_at": "2026-02-11T11:45:56.380616+00:00",
+  "failure_threshold": 3,
+  "cooldown_sec": 900,
+  "sources": {}
+}
