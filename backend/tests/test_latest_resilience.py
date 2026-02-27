@@ -9,6 +9,7 @@ import pytest
 from app.core.config import Settings
 from app.core.latest import LatestDataError, _with_retries, resolve_latest_timestamp
 from app.core.latest_source_health import configure_source_health
+from app.api.routes_latest import _build_dynamic_timestamps
 
 
 def _build_settings(tmp_path: Path) -> Settings:
@@ -107,3 +108,32 @@ def test_with_retries_stops_on_non_retryable_error() -> None:
         )
     assert calls["count"] == 1
 
+
+def test_build_dynamic_timestamps_prefers_forward_then_backward() -> None:
+    timeline = _build_dynamic_timestamps(
+        anchor_timestamp="2024-07-01_12",
+        all_timestamps=[
+            "2024-07-01_00",
+            "2024-07-01_06",
+            "2024-07-01_12",
+            "2024-07-01_18",
+            "2024-07-02_00",
+        ],
+        window=4,
+    )
+    assert timeline == [
+        "2024-07-01_06",
+        "2024-07-01_12",
+        "2024-07-01_18",
+        "2024-07-02_00",
+    ]
+
+
+def test_build_dynamic_timestamps_includes_anchor_when_missing() -> None:
+    timeline = _build_dynamic_timestamps(
+        anchor_timestamp="2024-07-01_12",
+        all_timestamps=["2024-07-01_00"],
+        window=4,
+    )
+    assert "2024-07-01_12" in timeline
+    assert len(timeline) == 2

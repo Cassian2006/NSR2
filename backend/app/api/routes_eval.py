@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from app.core.config import get_settings
 from app.core.dataset import normalize_timestamp
 from app.core.gallery import GalleryService
+from app.core.versioning import build_version_snapshot
 from app.eval.compare_ais import EvalError, evaluate_route_vs_ais_heatmap
 
 
@@ -21,8 +22,10 @@ class AisBacktestRequest(BaseModel):
 
 @router.post("/eval/ais/backtest")
 def run_ais_backtest(payload: AisBacktestRequest) -> dict:
+    settings = get_settings()
     route_geojson = payload.route_geojson
     timestamp = payload.timestamp
+    model_version = "unet_v1"
 
     if payload.gallery_id:
         item = GalleryService().get_item(payload.gallery_id)
@@ -32,6 +35,11 @@ def run_ais_backtest(payload: AisBacktestRequest) -> dict:
             route_geojson = item.get("route_geojson")
         if timestamp is None:
             timestamp = item.get("timestamp")
+        snapshot = item.get("version_snapshot")
+        if isinstance(snapshot, dict):
+            model_version = str(snapshot.get("model_version") or item.get("model_version") or model_version)
+        else:
+            model_version = str(item.get("model_version") or model_version)
 
     if route_geojson is None:
         raise HTTPException(status_code=422, detail="route_geojson is required (or provide gallery_id)")
@@ -45,15 +53,16 @@ def run_ais_backtest(payload: AisBacktestRequest) -> dict:
 
     try:
         metrics = evaluate_route_vs_ais_heatmap(
-            settings=get_settings(),
+            settings=settings,
             timestamp=normalized_ts,
             route_geojson=route_geojson,
         )
     except EvalError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    version_snapshot = build_version_snapshot(settings=settings, model_version=model_version)
     return {
         "metrics": metrics,
         "gallery_id": payload.gallery_id,
         "note": payload.topk_note or "",
+        "version_snapshot": version_snapshot,
     }
-

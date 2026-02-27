@@ -18,6 +18,28 @@ class PlanPolicy(BaseModel):
     corridor_bias: float = 0.2
     smoothing: bool = True
     planner: str = "astar"
+    risk_mode: str = "balanced"
+    risk_weight_scale: float = Field(default=1.0, ge=0.0, le=5.0)
+    risk_constraint_mode: str = "none"
+    risk_budget: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence_level: float = Field(default=0.9, ge=0.5, le=0.999)
+    return_candidates: bool = False
+    candidate_limit: int = Field(default=3, ge=1, le=6)
+    uncertainty_uplift: bool = True
+    uncertainty_uplift_scale: float = Field(default=1.0, ge=0.0, le=5.0)
+    dynamic_replan_mode: str = "on_event"
+    replan_blocked_ratio: float = Field(default=0.002, ge=0.0, le=1.0)
+    replan_risk_spike: float = Field(default=0.05, ge=0.0, le=5.0)
+    replan_corridor_min: float = Field(default=0.05, ge=0.0, le=1.0)
+    replan_max_skip_steps: int = Field(default=2, ge=1, le=100)
+    dynamic_risk_switch_enabled: bool = False
+    dynamic_risk_budget_km: float = Field(default=1.0, ge=0.0, le=1000.0)
+    dynamic_risk_warn_ratio: float = Field(default=0.7, ge=0.0, le=10.0)
+    dynamic_risk_hard_ratio: float = Field(default=1.0, ge=0.0, le=10.0)
+    dynamic_risk_warn_mode: str = "conservative"
+    dynamic_risk_hard_mode: str = "conservative"
+    dynamic_risk_switch_min_interval: int = Field(default=1, ge=1, le=500)
+    vessel_profile_id: str = "arc7_lng"
 
 
 class RoutePlanRequest(BaseModel):
@@ -40,6 +62,9 @@ class LatestPlanRequest(BaseModel):
     hour: int = 12
     force_refresh: bool = False
     progress_id: str | None = None
+    dynamic_replan_enabled: bool = False
+    dynamic_window: int = Field(default=6, ge=2, le=72)
+    dynamic_advance_steps: int = Field(default=12, ge=1, le=500)
     start: Coord
     goal: Coord
     policy: PlanPolicy = Field(default_factory=PlanPolicy)

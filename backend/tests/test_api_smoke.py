@@ -216,6 +216,16 @@ def test_dynamic_route_plan_replanning(client: TestClient) -> None:
     assert "replan_runtime_ms_total" in explain
     assert "dynamic_incremental_steps" in explain
     assert "dynamic_rebuild_steps" in explain
+    assert "dynamic_replan_mode" in explain
+    assert isinstance(explain.get("dynamic_trigger_events"), list)
+    assert isinstance(explain.get("dynamic_execution_log"), list)
+    assert explain.get("dynamic_execution_steps", 0) == len(explain.get("dynamic_execution_log", []))
+    assert isinstance(resp.json().get("dynamic_state_sequence_id"), str)
+    assert resp.json()["dynamic_state_sequence_id"] != ""
+    assert isinstance(resp.json().get("dynamic_state_sequence_file"), str)
+    assert resp.json()["dynamic_state_sequence_file"].endswith("sequence.json")
+    assert isinstance(resp.json().get("dynamic_state_checkpoint_file"), str)
+    assert resp.json()["dynamic_state_checkpoint_file"].endswith("checkpoint.json")
 
     payload["policy"]["planner"] = "astar"
     resp_astar = client.post("/v1/route/plan/dynamic", json=payload)
@@ -257,6 +267,40 @@ def test_latest_plan_fallback(client: TestClient) -> None:
         "nearest_local_fallback",
         "copernicus_live",
     }
+
+
+def test_latest_plan_dynamic_integration(client: TestClient) -> None:
+    payload = {
+        "date": "2024-10-15",
+        "hour": 12,
+        "dynamic_replan_enabled": True,
+        "dynamic_window": 5,
+        "dynamic_advance_steps": 8,
+        "start": TEST_START,
+        "goal": TEST_GOAL,
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "tie_breaker",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+            "planner": "dstar_lite",
+        },
+    }
+    resp = client.post("/v1/latest/plan", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    resolved = body.get("resolved", {})
+    dynamic = resolved.get("dynamic", {})
+    assert dynamic.get("enabled") is True
+    assert dynamic.get("mode") in {"dynamic", "static_fallback", "static_only"}
+    assert isinstance(dynamic.get("used_timestamps"), list)
+    explain = body.get("explain", {})
+    if dynamic.get("mode") == "dynamic":
+        assert isinstance(explain.get("dynamic_execution_log"), list)
+        assert explain.get("dynamic_replay_ready") is True
+    else:
+        assert "latest_dynamic" in explain
 
 
 def test_latest_progress_endpoint(client: TestClient) -> None:

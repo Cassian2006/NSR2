@@ -21,12 +21,19 @@ class Settings(BaseSettings):
     annotation_pack_root: Path = data_root / "processed" / "annotation_pack"
     env_grids_root: Path = data_root / "interim" / "env_grids"
     dataset_index_path: Path = data_root / "processed" / "dataset" / "index.json"
+    timestamps_index_path: Path = data_root / "processed" / "timestamps_index.json"
+    grid_spec_path: Path = data_root / "processed" / "grid_spec.json"
     ais_heatmap_root: Path = data_root / "ais_heatmap"
     gallery_root: Path = outputs_root / "gallery"
     pred_root: Path = outputs_root / "pred"
+    dataset_version_override: str = ""
+    plan_version: str = "plan_v1"
+    eval_version: str = "eval_v1"
     frontend_dist_root: Path = project_root / "frontend" / "build"
     unet_default_summary: Path = outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
     latest_root: Path = outputs_root / "latest"
+    dynamic_state_root: Path = outputs_root / "repro" / "dynamic_states"
+    dynamic_state_version: str = "state_v1"
     latest_progress_store_path: Path = latest_root / "progress_state.json"
     latest_source_health_path: Path = latest_root / "source_health.json"
     latest_progress_retention_hours: int = 72
@@ -36,6 +43,16 @@ class Settings(BaseSettings):
     latest_remote_retry_backoff_sec: float = 1.5
     latest_source_failure_threshold: int = 3
     latest_source_cooldown_sec: int = 900
+    latest_slo_ice_warn_hours: float = 6.0
+    latest_slo_ice_hard_hours: float = 24.0
+    latest_slo_wave_warn_hours: float = 12.0
+    latest_slo_wave_hard_hours: float = 36.0
+    latest_slo_wind_warn_hours: float = 12.0
+    latest_slo_wind_hard_hours: float = 36.0
+    latest_slo_ais_warn_hours: float = 6.0
+    latest_slo_ais_hard_hours: float = 24.0
+    latest_slo_warn_mode: str = "conservative"
+    latest_slo_hard_mode: str = "conservative"
     latest_snapshot_url_template: str = ""
     latest_snapshot_token: str = ""
     copernicus_username: str = ""
@@ -110,6 +127,10 @@ def get_settings() -> Settings:
         settings.env_grids_root = settings.data_root / "interim" / "env_grids"
     if "dataset_index_path" not in provided:
         settings.dataset_index_path = settings.data_root / "processed" / "dataset" / "index.json"
+    if "timestamps_index_path" not in provided:
+        settings.timestamps_index_path = settings.data_root / "processed" / "timestamps_index.json"
+    if "grid_spec_path" not in provided:
+        settings.grid_spec_path = settings.data_root / "processed" / "grid_spec.json"
     if "ais_heatmap_root" not in provided:
         settings.ais_heatmap_root = settings.data_root / "ais_heatmap"
 
@@ -119,6 +140,8 @@ def get_settings() -> Settings:
         settings.pred_root = settings.outputs_root / "pred"
     if "latest_root" not in provided:
         settings.latest_root = settings.outputs_root / "latest"
+    if "dynamic_state_root" not in provided:
+        settings.dynamic_state_root = settings.outputs_root / "repro" / "dynamic_states"
     if "latest_progress_store_path" not in provided:
         settings.latest_progress_store_path = settings.latest_root / "progress_state.json"
     if "latest_source_health_path" not in provided:
@@ -145,6 +168,7 @@ def get_settings() -> Settings:
 
     settings.outputs_root.mkdir(parents=True, exist_ok=True)
     settings.latest_root.mkdir(parents=True, exist_ok=True)
+    settings.dynamic_state_root.mkdir(parents=True, exist_ok=True)
     settings.gallery_root.mkdir(parents=True, exist_ok=True)
     (settings.gallery_root / "runs").mkdir(parents=True, exist_ok=True)
     (settings.gallery_root / "thumbs").mkdir(parents=True, exist_ok=True)

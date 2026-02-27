@@ -1,0 +1,42 @@
+name: ci-smoke
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  backend-smoke:
+    runs-on: ubuntu-latest
+    env:
+      NSR_DATA_ROOT: ${{ github.workspace }}/backend/demo_data
+      NSR_OUTPUTS_ROOT: ${{ github.workspace }}/backend/outputs_ci
+      NSR_ALLOW_DEMO_FALLBACK: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Repro Pipeline Smoke
+        run: |
+          python scripts/repro_pipeline.py --sample-mode --allow-warn --out outputs/repro/repro_summary_ci.json
+
+      - name: Targeted Pytest Smoke
+        run: |
+          python -m pytest -q tests/test_run_snapshot.py tests/test_data_quality_gate.py tests/test_datasets_registry_api.py
+

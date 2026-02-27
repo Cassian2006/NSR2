@@ -1,0 +1,11 @@
+{
+  "data_root": "C:\\Users\\cai yuan qi\\Desktop\\NSR2\\backend\\demo_data",
+  "manifest_path": "C:\\Users\\cai yuan qi\\Desktop\\NSR2\\backend\\demo_data\\processed\\manifest.jsonl",
+  "state_path": "C:\\Users\\cai yuan qi\\Desktop\\NSR2\\backend\\demo_data\\processed\\manifest.state.json",
+  "total_files": 33,
+  "hashed_files": 0,
+  "reused_hash_files": 33,
+  "removed_files": 0,
+  "removed_examples": [],
+  "generated_at": "2026-02-13T06:43:42.321903+00:00"
+}

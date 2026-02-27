@@ -37,6 +37,11 @@ interface MapCanvasProps {
   start?: { lat: number; lon: number };
   goal?: { lat: number; lon: number };
   onMapClick?: (lat: number, lon: number) => void;
+  replayOverlay?: {
+    executedCoordinates?: [number, number][];
+    currentSegment?: [number, number][];
+    candidateSegment?: [number, number][];
+  };
 }
 
 const API_ORIGIN = getApiOrigin();
@@ -150,6 +155,7 @@ export default function MapCanvas({
   start,
   goal,
   onMapClick,
+  replayOverlay,
 }: MapCanvasProps) {
   const { t } = useLanguage();
   const [mousePos, setMousePos] = useState({ lat: 79.234, lon: 45.678 });
@@ -182,6 +188,19 @@ export default function MapCanvas({
     const coords = displayCoords && displayCoords.length >= 2 ? displayCoords : routeGeojson?.geometry?.coordinates ?? [];
     return coords.map(([lon, lat]) => [lat, lon] as [number, number]);
   }, [routeGeojson]);
+
+  const replayExecutedLatLng = useMemo(
+    () => (replayOverlay?.executedCoordinates ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
+    [replayOverlay?.executedCoordinates]
+  );
+  const replayCurrentLatLng = useMemo(
+    () => (replayOverlay?.currentSegment ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
+    [replayOverlay?.currentSegment]
+  );
+  const replayCandidateLatLng = useMemo(
+    () => (replayOverlay?.candidateSegment ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
+    [replayOverlay?.candidateSegment]
+  );
 
   return (
     <div className="absolute inset-0">
@@ -230,6 +249,18 @@ export default function MapCanvas({
 
         {showRoute && routeLatLng.length >= 2 ? (
           <Polyline positions={routeLatLng} pathOptions={{ color: "#1e40af", weight: 4, opacity: 0.95 }} />
+        ) : null}
+        {replayCandidateLatLng.length >= 2 ? (
+          <Polyline
+            positions={replayCandidateLatLng}
+            pathOptions={{ color: "#f59e0b", weight: 3, opacity: 0.95, dashArray: "7 5" }}
+          />
+        ) : null}
+        {replayExecutedLatLng.length >= 2 ? (
+          <Polyline positions={replayExecutedLatLng} pathOptions={{ color: "#16a34a", weight: 4, opacity: 0.95 }} />
+        ) : null}
+        {replayCurrentLatLng.length >= 2 ? (
+          <Polyline positions={replayCurrentLatLng} pathOptions={{ color: "#0ea5e9", weight: 5, opacity: 0.98 }} />
         ) : null}
         {start ? <CircleMarker center={[start.lat, start.lon]} radius={6} pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#10b981", fillOpacity: 1 }} /> : null}
         {goal ? <CircleMarker center={[goal.lat, goal.lon]} radius={6} pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#ef4444", fillOpacity: 1 }} /> : null}

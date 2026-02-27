@@ -12,6 +12,8 @@ import numpy as np
 
 from app.core.config import Settings
 from app.core.geo import GridGeo, load_grid_geo
+from app.core.grid_alignment import get_timestamp_alignment
+from app.core.risk_field import get_risk_layer
 from app.model.infer import InferenceError, run_unet_inference
 
 
@@ -244,11 +246,17 @@ def _render_continuous(
 
 def _render_bathy(sampled: np.ndarray, inside: np.ndarray) -> np.ndarray:
     image = _empty_image(sampled.shape[1], sampled.shape[0])
-    blocked = (sampled > 0.5) & inside
-    image[blocked, 0] = 10
-    image[blocked, 1] = 10
-    image[blocked, 2] = 10
-    image[blocked, 3] = 190
+    # Render bathy/land mask with soft edge alpha to avoid visibly jagged coastline pixels.
+    # blocked_mask is binary on disk (0 sea / 1 blocked). We sample with bilinear and
+    # convert the boundary band into a smooth alpha transition for display only.
+    blocked_prob = np.clip(np.nan_to_num(sampled, nan=1.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+    t = np.clip((blocked_prob - 0.35) / 0.30, 0.0, 1.0)
+    alpha = (t * 190.0).astype(np.uint8)
+    visible = inside & (alpha > 0)
+    image[visible, 0] = 10
+    image[visible, 1] = 10
+    image[visible, 2] = 10
+    image[visible, 3] = alpha[visible]
     return image
 
 
@@ -275,6 +283,86 @@ def _render_caution_mask(sampled: np.ndarray, inside: np.ndarray) -> np.ndarray:
     caution = (sampled > 0.5) & inside
     image[caution] = np.asarray([245, 158, 11, 168], dtype=np.uint8)
     return image
+
+
+def _grow_mask_once(mask: np.ndarray) -> np.ndarray:
+    pad = np.pad(mask, ((1, 1), (1, 1)), mode="constant", constant_values=False)
+    return (
+        pad[1:-1, 1:-1]
+        | pad[:-2, 1:-1]
+        | pad[2:, 1:-1]
+        | pad[1:-1, :-2]
+        | pad[1:-1, 2:]
+        | pad[:-2, :-2]
+        | pad[:-2, 2:]
+        | pad[2:, :-2]
+        | pad[2:, 2:]
+    )
+
+
+def _box_blur3x3(field: np.ndarray, passes: int = 1) -> np.ndarray:
+    out = field.astype(np.float32)
+    for _ in range(max(0, int(passes))):
+        pad = np.pad(out, ((1, 1), (1, 1)), mode="edge")
+        out = (
+            pad[:-2, :-2]
+            + pad[:-2, 1:-1]
+            + pad[:-2, 2:]
+            + pad[1:-1, :-2]
+            + pad[1:-1, 1:-1]
+            + pad[1:-1, 2:]
+            + pad[2:, :-2]
+            + pad[2:, 1:-1]
+            + pad[2:, 2:]
+        ) / 9.0
+    return out
+
+
+def _enhance_uncertainty_for_display(
+    sampled_uncertainty: np.ndarray,
+    inside: np.ndarray,
+    *,
+    pred_sampled: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Visual-only enhancement for uncertainty:
+    - smooth blocky artifacts from cached/proxy uncertainty maps
+    - amplify uncertainty around caution boundaries with controllable spread
+    """
+    unc = np.clip(np.nan_to_num(sampled_uncertainty.astype(np.float32), nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+    unc = _box_blur3x3(unc, passes=1)
+
+    if pred_sampled is None or pred_sampled.shape != unc.shape:
+        return np.where(inside, unc, 0.0).astype(np.float32)
+
+    pred = np.rint(pred_sampled).astype(np.int16)
+    caution = (pred == 1) & inside
+    if not caution.any():
+        return np.where(inside, unc, 0.0).astype(np.float32)
+
+    caution_nb = _grow_mask_once(caution)
+    trans = np.zeros_like(caution, dtype=bool)
+    ud = pred[1:, :] != pred[:-1, :]
+    lr = pred[:, 1:] != pred[:, :-1]
+    trans[1:, :] |= ud
+    trans[:-1, :] |= ud
+    trans[:, 1:] |= lr
+    trans[:, :-1] |= lr
+
+    boundary = trans & caution_nb & inside
+    boost = np.zeros_like(unc, dtype=np.float32)
+    ring = boundary.copy()
+    for weight in (0.52, 0.38, 0.26, 0.18):
+        if not ring.any():
+            break
+        boost = np.maximum(boost, ring.astype(np.float32) * float(weight))
+        ring = _grow_mask_once(ring) & inside
+
+    # Keep caution interiors slightly uncertain and expand their boundary halo.
+    boost = np.maximum(boost, caution.astype(np.float32) * 0.20)
+    out = np.maximum(unc, boost)
+    out = _box_blur3x3(out, passes=1)
+    return np.where(inside, np.clip(out, 0.0, 1.0), 0.0).astype(np.float32)
 
 
 def _normalize_ice_sampled(sampled: np.ndarray) -> np.ndarray:
@@ -366,6 +454,18 @@ def _load_layer_grid(settings: Settings, timestamp: str, layer: str) -> np.ndarr
             return np.load(unc_path).astype(np.float32)
         return None
 
+    if layer in {"risk_mean", "risk_p90", "risk_std"}:
+        try:
+            return get_risk_layer(
+                settings=settings,
+                timestamp=timestamp,
+                layer=layer,
+                model_version="unet_v1",
+                force_refresh=False,
+            )
+        except Exception:
+            return None
+
     if x_stack is None:
         return None
 
@@ -393,12 +493,16 @@ def render_overlay_png(
     width: int,
     height: int,
 ) -> bytes:
+    alignment = get_timestamp_alignment(settings, timestamp)
+    if not bool(alignment.get("ok", False)):
+        return _encode_png_rgba(_empty_image(width, height))
+
     grid = _load_layer_grid(settings, timestamp, layer)
     if grid is None or grid.ndim != 2:
         return _encode_png_rgba(_empty_image(width, height))
 
     geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
-    sampling_mode = "nearest" if layer in {"bathy", "unet_pred", "caution_mask"} else "bilinear"
+    sampling_mode = "nearest" if layer in {"unet_pred", "caution_mask"} else "bilinear"
     sampled, inside = _sample_grid(
         grid.astype(np.float32),
         bbox,
@@ -432,6 +536,7 @@ def render_overlay_png(
     elif layer == "unet_uncertainty":
         sea_mask = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        pred_sampled = None
         if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
             bathy_sampled, _ = _sample_grid(
                 bathy_grid.astype(np.float32),
@@ -442,13 +547,27 @@ def render_overlay_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
-        sampled_unc = np.clip(np.nan_to_num(sampled, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+        pred_grid = _load_layer_grid(settings, timestamp, "unet_pred")
+        if pred_grid is not None and pred_grid.ndim == 2 and pred_grid.shape == grid.shape:
+            pred_sampled, _ = _sample_grid(
+                pred_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
+        sampled_unc = _enhance_uncertainty_for_display(
+            sampled,
+            inside,
+            pred_sampled=pred_sampled,
+        )
         image = _render_continuous(
             sampled_unc,
             inside,
             stops=[(0.0, (16, 185, 129)), (0.5, (245, 158, 11)), (1.0, (220, 38, 38))],
-            alpha_min=20,
-            alpha_max=190,
+            alpha_min=28,
+            alpha_max=210,
             value_mask=sea_mask,
         )
     elif layer == "ais_heatmap":
@@ -541,6 +660,48 @@ def render_overlay_png(
             alpha_max=175,
             value_mask=sea_mask,
         )
+    elif layer in {"risk_mean", "risk_p90", "risk_std"}:
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid(
+                bathy_grid.astype(np.float32),
+                bbox,
+                width,
+                height,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
+        if layer == "risk_std":
+            stops = [
+                (0.0, (56, 189, 248)),
+                (0.5, (168, 85, 247)),
+                (1.0, (220, 38, 38)),
+            ]
+            alpha_min, alpha_max = 18, 170
+        elif layer == "risk_p90":
+            stops = [
+                (0.0, (14, 165, 233)),
+                (0.45, (250, 204, 21)),
+                (1.0, (220, 38, 38)),
+            ]
+            alpha_min, alpha_max = 30, 200
+        else:
+            stops = [
+                (0.0, (16, 185, 129)),
+                (0.5, (245, 158, 11)),
+                (1.0, (220, 38, 38)),
+            ]
+            alpha_min, alpha_max = 25, 190
+        image = _render_continuous(
+            sampled,
+            inside,
+            stops=stops,
+            alpha_min=alpha_min,
+            alpha_max=alpha_max,
+            value_mask=sea_mask,
+        )
     else:
         image = _empty_image(width, height)
     return _encode_png_rgba(image)
@@ -556,13 +717,17 @@ def render_tile_png(
     y: int,
     tile_size: int = 256,
 ) -> bytes:
+    alignment = get_timestamp_alignment(settings, timestamp)
+    if not bool(alignment.get("ok", False)):
+        return _encode_png_rgba(_empty_image(tile_size, tile_size))
+
     grid = _load_layer_grid(settings, timestamp, layer)
     if grid is None or grid.ndim != 2:
         return _encode_png_rgba(_empty_image(tile_size, tile_size))
 
     geo = load_grid_geo(settings, timestamp=timestamp, shape=grid.shape)
     lats, lons = _tile_pixel_latlon_axes(z=z, x=x, y=y, tile_size=tile_size)
-    sampling_mode = "nearest" if layer in {"bathy", "unet_pred", "caution_mask"} else "bilinear"
+    sampling_mode = "nearest" if layer in {"unet_pred", "caution_mask"} else "bilinear"
     sampled, inside = _sample_grid_from_axes(
         grid.astype(np.float32),
         lats,
@@ -594,6 +759,7 @@ def render_tile_png(
     elif layer == "unet_uncertainty":
         sea_mask = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        pred_sampled = None
         if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
             bathy_sampled, _ = _sample_grid_from_axes(
                 bathy_grid.astype(np.float32),
@@ -603,13 +769,26 @@ def render_tile_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
-        sampled_unc = np.clip(np.nan_to_num(sampled, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+        pred_grid = _load_layer_grid(settings, timestamp, "unet_pred")
+        if pred_grid is not None and pred_grid.ndim == 2 and pred_grid.shape == grid.shape:
+            pred_sampled, _ = _sample_grid_from_axes(
+                pred_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
+        sampled_unc = _enhance_uncertainty_for_display(
+            sampled,
+            inside,
+            pred_sampled=pred_sampled,
+        )
         image = _render_continuous(
             sampled_unc,
             inside,
             stops=[(0.0, (16, 185, 129)), (0.5, (245, 158, 11)), (1.0, (220, 38, 38))],
-            alpha_min=20,
-            alpha_max=190,
+            alpha_min=28,
+            alpha_max=210,
             value_mask=sea_mask,
         )
     elif layer == "ais_heatmap":
@@ -696,6 +875,47 @@ def render_tile_png(
             stops=[(0.0, (16, 185, 129)), (0.5, (234, 179, 8)), (1.0, (124, 58, 237))],
             alpha_min=25,
             alpha_max=175,
+            value_mask=sea_mask,
+        )
+    elif layer in {"risk_mean", "risk_p90", "risk_std"}:
+        sea_mask = None
+        bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
+        if bathy_grid is not None and bathy_grid.ndim == 2 and bathy_grid.shape == grid.shape:
+            bathy_sampled, _ = _sample_grid_from_axes(
+                bathy_grid.astype(np.float32),
+                lats,
+                lons,
+                geo=geo,
+                mode="nearest",
+            )
+            sea_mask = bathy_sampled <= 0.5
+        if layer == "risk_std":
+            stops = [
+                (0.0, (56, 189, 248)),
+                (0.5, (168, 85, 247)),
+                (1.0, (220, 38, 38)),
+            ]
+            alpha_min, alpha_max = 18, 170
+        elif layer == "risk_p90":
+            stops = [
+                (0.0, (14, 165, 233)),
+                (0.45, (250, 204, 21)),
+                (1.0, (220, 38, 38)),
+            ]
+            alpha_min, alpha_max = 30, 200
+        else:
+            stops = [
+                (0.0, (16, 185, 129)),
+                (0.5, (245, 158, 11)),
+                (1.0, (220, 38, 38)),
+            ]
+            alpha_min, alpha_max = 25, 190
+        image = _render_continuous(
+            sampled,
+            inside,
+            stops=stops,
+            alpha_min=alpha_min,
+            alpha_max=alpha_max,
             value_mask=sea_mask,
         )
     else:

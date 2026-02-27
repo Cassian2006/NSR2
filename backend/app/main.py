@@ -9,11 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes_eval import router as eval_router
 from app.api.routes_active_review import router as active_review_router
 from app.api.routes_annotation_workspace import router as annotation_workspace_router
+from app.api.routes_compliance import router as compliance_router
 from app.api.routes_gallery import router as gallery_router
 from app.api.routes_infer import router as infer_router
 from app.api.routes_layers import router as layers_router
 from app.api.routes_latest import router as latest_router
 from app.api.routes_plan import router as plan_router
+from app.api.routes_vessels import router as vessels_router
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
 from app.core.latest_progress import configure_progress_store
@@ -53,9 +55,11 @@ def create_app() -> FastAPI:
     app.include_router(infer_router, prefix="/v1")
     app.include_router(plan_router, prefix="/v1")
     app.include_router(latest_router, prefix="/v1")
+    app.include_router(vessels_router, prefix="/v1")
     app.include_router(active_review_router, prefix="/v1")
     app.include_router(annotation_workspace_router, prefix="/v1")
     app.include_router(gallery_router, prefix="/v1")
+    app.include_router(compliance_router, prefix="/v1")
     app.include_router(eval_router, prefix="/v1")
 
     @app.get("/healthz")

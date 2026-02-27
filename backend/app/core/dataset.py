@@ -82,8 +82,37 @@ class DatasetService:
             return data
         return []
 
-    def list_timestamps(self, month: str | None = None) -> list[str]:
+    @lru_cache(maxsize=1)
+    def _read_timestamps_index(self) -> list[str]:
+        p = self.settings.timestamps_index_path
+        if not p.exists():
+            return []
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if not isinstance(data, dict):
+            return []
+        items = data.get("timestamps", [])
+        if not isinstance(items, list):
+            return []
+        out: list[str] = []
+        for raw in items:
+            try:
+                out.append(normalize_timestamp(str(raw)))
+            except Exception:
+                continue
+        return sorted(set(out))
+
+    def list_source_timestamps(self, month: str | None = None) -> list[str]:
         all_ts = sorted(self._scan_samples().keys())
+        if month and month.lower() not in {"all", "*"}:
+            return [ts for ts in all_ts if ts.startswith(month)]
+        return all_ts
+
+    def list_timestamps(self, month: str | None = None) -> list[str]:
+        indexed = self._read_timestamps_index()
+        all_ts = indexed if indexed else self.list_source_timestamps(month="all")
         if month and month.lower() not in {"all", "*"}:
             return [ts for ts in all_ts if ts.startswith(month)]
         return all_ts
@@ -156,6 +185,7 @@ class DatasetService:
         has_ice_channel = "ice_conc" in channel_names
         has_wave_channel = "wave_hs" in channel_names
         has_wind_channel = "wind_u10" in channel_names and "wind_v10" in channel_names
+        risk_available = bool(sample and "x_stack.npy" in sample.files and "blocked_mask.npy" in sample.files)
         return [
             {
                 "id": "bathy",
@@ -205,6 +235,24 @@ class DatasetService:
                 "name": "Wind 10m",
                 "available": has_wind_channel or self._layer_available_from_raw("wind", normalized),
                 "unit": "m/s",
+            },
+            {
+                "id": "risk_mean",
+                "name": "Risk Mean",
+                "available": risk_available,
+                "unit": "score",
+            },
+            {
+                "id": "risk_p90",
+                "name": "Risk P90",
+                "available": risk_available,
+                "unit": "score",
+            },
+            {
+                "id": "risk_std",
+                "name": "Risk Std",
+                "available": risk_available,
+                "unit": "score",
             },
         ]
 

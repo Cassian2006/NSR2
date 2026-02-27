@@ -110,6 +110,34 @@ def _to_markdown(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _build_profile(report: dict, model_version: str) -> dict:
+    summary = report.get("summary", {})
+    suggestions = report.get("threshold_suggestions", [])
+    target = None
+    if isinstance(suggestions, list) and suggestions:
+        target = min(
+            (s for s in suggestions if isinstance(s, dict)),
+            key=lambda s: abs(float(s.get("target_error_rate", 0.10)) - 0.10),
+            default=None,
+        )
+    threshold = float(target.get("uncertainty_threshold", 0.65)) if isinstance(target, dict) else 0.65
+    threshold = float(np.clip(threshold, 0.05, 0.98))
+    return {
+        "schema_version": "uncertainty_calibration_v1",
+        "model_version": model_version,
+        "temperature": float(summary.get("temperature", 1.0)),
+        "uncertainty_threshold": threshold,
+        "uplift_scale": 0.35,
+        "target_error_rate": float(target.get("target_error_rate", 0.10)) if isinstance(target, dict) else 0.10,
+        "coverage": float(target.get("coverage", 0.0)) if isinstance(target, dict) else 0.0,
+        "expected_error": float(target.get("expected_error", 1.0)) if isinstance(target, dict) else 1.0,
+        "ece_before": float(summary.get("ece_before", 0.0)),
+        "ece_after": float(summary.get("ece_after", 0.0)),
+        "brier_before": float(summary.get("brier_before", 0.0)),
+        "brier_after": float(summary.get("brier_after", 0.0)),
+    }
+
+
 def main() -> None:
     args = parse_args()
     settings = get_settings()
@@ -191,16 +219,21 @@ def main() -> None:
         "reliability_after": reliability_bins(cal.confidence_after, outcome, n_bins=max(6, int(args.bins))),
         "threshold_suggestions": suggestions,
     }
+    report["profile"] = _build_profile(report, model_version=args.model_version)
 
     out_dir = Path(args.out_dir) if args.out_dir else (settings.outputs_root / "calibration")
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     json_path = out_dir / f"uncertainty_calibration_{stamp}.json"
     md_path = out_dir / f"uncertainty_calibration_{stamp}.md"
+    stable_path = out_dir / args.model_version / "calibration.json"
+    stable_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     md_path.write_text(_to_markdown(report), encoding="utf-8")
+    stable_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"json={json_path}")
     print(f"md={md_path}")
+    print(f"stable={stable_path}")
     print(
         "metrics=ece:{:.6f}->{:.6f},brier:{:.6f}->{:.6f},nll:{:.6f}->{:.6f},improved={}".format(
             report["summary"]["ece_before"],

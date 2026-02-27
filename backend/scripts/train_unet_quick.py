@@ -22,6 +22,9 @@ from app.model.losses import FocalDiceLoss
 from app.model.train_config import resolve_class_weights, resolve_loss_hparams
 from app.model.tiny_unet import TinyUNet
 from app.model.train_quality import build_hard_sample_weights, evaluate_sample_quality
+from app.core.config import get_settings
+from app.core.run_snapshot import save_run_snapshot
+from app.core.versioning import build_version_snapshot
 
 
 def parse_args() -> argparse.Namespace:
@@ -645,6 +648,70 @@ def main() -> None:
     with (out_dir / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print(f"saved_summary={out_dir / 'summary.json'}")
+
+    try:
+        settings = get_settings()
+        version_snapshot = build_version_snapshot(settings=settings, model_version=f"train_{out_dir.name}")
+        snap = save_run_snapshot(
+            settings=settings,
+            kind="train_unet_quick",
+            config={
+                "script": "train_unet_quick.py",
+                "manifest": str(manifest),
+                "args": {
+                    "epochs": args.epochs,
+                    "steps_per_epoch": args.steps_per_epoch,
+                    "val_steps": args.val_steps,
+                    "batch_size": args.batch_size,
+                    "patch_size": args.patch_size,
+                    "lr": args.lr,
+                    "loss": str(loss_cfg["loss"]),
+                    "loss_preset": str(loss_cfg["loss_preset"]),
+                    "class_weight_mode": args.class_weight_mode,
+                },
+            },
+            result={
+                "out_dir": str(out_dir),
+                "summary_file": str(out_dir / "summary.json"),
+                "best_val_loss": float(best_val),
+                "train_samples": int(len(train_items)),
+                "val_samples": int(len(val_items)),
+            },
+            version_snapshot=version_snapshot,
+            replay={
+                "runner": "script.train_unet_quick",
+                "argv": [
+                    "python",
+                    "scripts/train_unet_quick.py",
+                    "--manifest",
+                    str(manifest),
+                    "--epochs",
+                    str(args.epochs),
+                    "--steps-per-epoch",
+                    str(args.steps_per_epoch),
+                    "--val-steps",
+                    str(args.val_steps),
+                    "--batch-size",
+                    str(args.batch_size),
+                    "--patch-size",
+                    str(args.patch_size),
+                    "--lr",
+                    str(args.lr),
+                    "--loss",
+                    str(loss_cfg["loss"]),
+                    "--loss-preset",
+                    str(loss_cfg["loss_preset"]),
+                ],
+            },
+            tags=["training", "unet"],
+        )
+        summary["run_snapshot_id"] = snap["snapshot_id"]
+        summary["run_snapshot_file"] = snap["snapshot_file"]
+        with (out_dir / "summary.json").open("w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        print(f"run_snapshot_id={snap['snapshot_id']}")
+    except Exception as exc:
+        print(f"run_snapshot_warning={exc}")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,11 @@ from app.core.config import Settings
 from app.core.copernicus_live import CopernicusLiveError, is_copernicus_configured, pull_latest_env_partial
 from app.core.geo import load_grid_geo
 from app.core.latest_source_health import can_attempt_source, record_source_failure, record_source_success
+from app.core.source_metadata import (
+    build_source_metadata,
+    ensure_required_source_metadata,
+    timestamp_to_valid_time,
+)
 
 
 TIMESTAMP_FMT = "%Y-%m-%d_%H"
@@ -162,6 +167,10 @@ def _save_annotation_pack(
     target_lat: np.ndarray | None = None,
     target_lon: np.ndarray | None = None,
 ) -> None:
+    normalized_source_meta = ensure_required_source_metadata(
+        metadata=source_meta,
+        timestamp=timestamp,
+    )
     ann_dir = settings.annotation_pack_root / timestamp
     ann_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write_npy(ann_dir / "x_stack.npy", x_stack.astype(np.float32))
@@ -173,7 +182,7 @@ def _save_annotation_pack(
         "blocked_mask": "blocked_mask.npy",
         "channel_names": channel_names,
         "shape": [int(x_stack.shape[1]), int(x_stack.shape[2])],
-        "source": source_meta,
+        "source": normalized_source_meta,
     }
     if target_lat is not None:
         meta["target_lat"] = [float(v) for v in target_lat.tolist()]
@@ -181,7 +190,7 @@ def _save_annotation_pack(
         meta["target_lon"] = [float(v) for v in target_lon.tolist()]
 
     _atomic_write_json(ann_dir / "meta.json", meta)
-    _atomic_write_json(ann_dir / "latest_meta.json", source_meta)
+    _atomic_write_json(ann_dir / "latest_meta.json", normalized_source_meta)
 
 
 def get_latest_meta(settings: Settings, timestamp: str) -> dict:
@@ -328,11 +337,15 @@ def _download_latest_snapshot(
         x_stack=x_stack,
         blocked_mask=blocked_mask,
         channel_names=channel_names,
-        source_meta={
-            "source": "remote_snapshot",
-            "snapshot_url": url,
-            "materialized_at": _utc_now_iso(),
-        },
+        source_meta=build_source_metadata(
+            source="remote_snapshot",
+            product_id="remote_snapshot_npz",
+            valid_time=timestamp_to_valid_time(timestamp),
+            extra={
+                "snapshot_url": url,
+                "materialized_at": _utc_now_iso(),
+            },
+        ),
     )
     _emit_progress(progress_cb, "snapshot", "Remote snapshot persisted", 90)
     return url
@@ -397,28 +410,32 @@ def _materialize_from_copernicus(
             out_stack[idx] = np.nan_to_num(field, nan=0.0, posinf=0.0, neginf=0.0)
     _emit_progress(progress_cb, "merge", "Merging live channels into model input", 82)
 
-    source_meta = {
-        "source": "copernicus_live",
-        "materialized_at": _utc_now_iso(),
-        "requested_timestamp": timestamp,
-        "template_timestamp": base_timestamp,
-        "datasets": {
-            "ice_dataset_id": settings.copernicus_ice_dataset_id,
-            "wave_dataset_id": settings.copernicus_wave_dataset_id,
-            "wind_dataset_id": settings.copernicus_wind_dataset_id,
+    source_meta = build_source_metadata(
+        source="copernicus_live",
+        product_id="copernicus_multi",
+        valid_time=timestamp_to_valid_time(timestamp),
+        extra={
+            "materialized_at": _utc_now_iso(),
+            "requested_timestamp": timestamp,
+            "template_timestamp": base_timestamp,
+            "datasets": {
+                "ice_dataset_id": settings.copernicus_ice_dataset_id,
+                "wave_dataset_id": settings.copernicus_wave_dataset_id,
+                "wind_dataset_id": settings.copernicus_wind_dataset_id,
+            },
+            "variables": {
+                "ice_var": settings.copernicus_ice_var,
+                "ice_thick_var": settings.copernicus_ice_thick_var,
+                "wave_var": settings.copernicus_wave_var,
+                "wind_u_var": settings.copernicus_wind_u_var,
+                "wind_v_var": settings.copernicus_wind_v_var,
+            },
+            "channel_source": pulled.channel_source,
+            "pulled_channels": sorted(list(pulled.fields.keys())),
+            "notes": pulled.notes,
+            "stats": pulled.stats,
         },
-        "variables": {
-            "ice_var": settings.copernicus_ice_var,
-            "ice_thick_var": settings.copernicus_ice_thick_var,
-            "wave_var": settings.copernicus_wave_var,
-            "wind_u_var": settings.copernicus_wind_u_var,
-            "wind_v_var": settings.copernicus_wind_v_var,
-        },
-        "channel_source": pulled.channel_source,
-        "pulled_channels": sorted(list(pulled.fields.keys())),
-        "notes": pulled.notes,
-        "stats": pulled.stats,
-    }
+    )
     if settings.copernicus_wind_u_var.lower() in {"vxo", "uo"} and settings.copernicus_wind_v_var.lower() in {"vyo", "vo"}:
         source_meta["notes"] = list(source_meta.get("notes", [])) + [
             "wind_u10/wind_v10 currently mapped from ocean vector fields (vxo/vyo) as live proxy."

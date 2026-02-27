@@ -65,6 +65,21 @@ export type RoutePlanRequest = {
     corridor_bias: number;
     smoothing: boolean;
     planner?: string;
+    risk_mode?: "conservative" | "balanced" | "aggressive" | string;
+    risk_weight_scale?: number;
+    risk_constraint_mode?: "none" | "chance" | "cvar" | string;
+    risk_budget?: number;
+    confidence_level?: number;
+    return_candidates?: boolean;
+    candidate_limit?: number;
+    dynamic_risk_switch_enabled?: boolean;
+    dynamic_risk_budget_km?: number;
+    dynamic_risk_warn_ratio?: number;
+    dynamic_risk_hard_ratio?: number;
+    dynamic_risk_warn_mode?: "conservative" | "balanced" | "aggressive" | string;
+    dynamic_risk_hard_mode?: "conservative" | "balanced" | "aggressive" | string;
+    dynamic_risk_switch_min_interval?: number;
+    vessel_profile_id?: string;
   };
 };
 
@@ -80,7 +95,107 @@ export type DynamicRoutePlanRequest = {
     corridor_bias: number;
     smoothing: boolean;
     planner?: string;
+    risk_mode?: "conservative" | "balanced" | "aggressive" | string;
+    risk_weight_scale?: number;
+    risk_constraint_mode?: "none" | "chance" | "cvar" | string;
+    risk_budget?: number;
+    confidence_level?: number;
+    return_candidates?: boolean;
+    candidate_limit?: number;
+    uncertainty_uplift?: boolean;
+    uncertainty_uplift_scale?: number;
+    dynamic_replan_mode?: "always" | "on_event" | string;
+    replan_blocked_ratio?: number;
+    replan_risk_spike?: number;
+    replan_corridor_min?: number;
+    replan_max_skip_steps?: number;
+    dynamic_risk_switch_enabled?: boolean;
+    dynamic_risk_budget_km?: number;
+    dynamic_risk_warn_ratio?: number;
+    dynamic_risk_hard_ratio?: number;
+    dynamic_risk_warn_mode?: "conservative" | "balanced" | "aggressive" | string;
+    dynamic_risk_hard_mode?: "conservative" | "balanced" | "aggressive" | string;
+    dynamic_risk_switch_min_interval?: number;
+    vessel_profile_id?: string;
   };
+};
+
+export type VesselProfile = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  ice_class: string;
+  draft_m: number;
+  min_safe_depth_m: number;
+  default_policy: {
+    risk_mode: string;
+    risk_weight_scale: number;
+    risk_budget: number;
+    confidence_level: number;
+    corridor_bias_multiplier: number;
+  };
+};
+
+export type DynamicExecutionEntry = {
+  step: number;
+  timestamp: string;
+  update_mode?: string;
+  triggered_replan?: boolean;
+  trigger_reasons?: string[];
+  moved_edges?: number;
+  moved_distance_km?: number;
+  step_effective_cost_km?: number;
+  step_risk_extra_km?: number;
+  cumulative_distance_km?: number;
+  cumulative_risk_extra_km?: number;
+  replan_runtime_ms?: number;
+  cumulative_replan_runtime_ms?: number;
+  segment_coordinates?: [number, number][];
+  segment_start?: [number, number];
+  segment_end?: [number, number];
+  candidate_coordinates?: [number, number][];
+};
+
+export type DynamicReplanEntry = {
+  step: number;
+  timestamp: string;
+  runtime_ms?: number;
+  update_runtime_ms?: number;
+  moved_distance_km?: number;
+  step_effective_cost_km?: number;
+  step_risk_extra_km?: number;
+  changed_cells_total?: number;
+  changed_edge_count?: number;
+  update_mode?: string;
+  triggered_replan?: boolean;
+  trigger_reasons?: string[];
+};
+
+export type RouteCandidate = {
+  id: string;
+  label: string;
+  strategy: string;
+  status: "ok" | "failed" | string;
+  distance_km?: number;
+  risk_exposure?: number;
+  caution_len_km?: number;
+  corridor_score?: number;
+  pareto_rank?: number | null;
+  pareto_frontier?: boolean;
+  pareto_order?: number | null;
+  pareto_score?: number | null;
+  planner?: string;
+  risk_mode?: string;
+  caution_mode?: string;
+  error?: string;
+  route_geojson?: {
+    type: "Feature";
+    geometry: { type: "LineString"; coordinates: [number, number][] };
+    properties: Record<string, unknown>;
+  };
+  explain?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
 };
 
 export type RoutePlanResponse = {
@@ -96,6 +211,7 @@ export type RoutePlanResponse = {
     corridor_alignment: number;
     [key: string]: unknown;
   };
+  candidates?: RouteCandidate[];
   gallery_id: string;
   progress_id?: string;
   resolved?: {
@@ -105,6 +221,14 @@ export type RoutePlanResponse = {
     used_timestamp?: string;
     source?: string;
     note?: string;
+    dynamic?: {
+      enabled?: boolean;
+      mode?: string;
+      requested_window?: number;
+      requested_advance_steps?: number;
+      used_timestamps?: string[];
+      note?: string;
+    };
   };
   latest_meta?: Record<string, unknown>;
 };
@@ -154,6 +278,58 @@ export type GalleryItem = {
   };
   timeline?: Array<{ event?: string; status?: string; [key: string]: unknown }>;
   [key: string]: unknown;
+};
+
+export type GalleryRiskReport = {
+  report_version: string;
+  generated_at: string;
+  gallery_id: string;
+  timestamp: string;
+  summary: Record<string, unknown>;
+  risk: Record<string, unknown>;
+  strategy: Record<string, unknown>;
+  candidate_comparison: {
+    count: number;
+    ok_count: number;
+    pareto_summary?: Record<string, unknown>;
+    items: Array<Record<string, unknown>>;
+  };
+  explain: Record<string, unknown>;
+  compliance?: ComplianceNoticesPayload;
+};
+
+export type ComplianceNotice = {
+  id: string;
+  severity: "low" | "medium" | "high" | string;
+  messages: {
+    en?: string;
+    zh?: string;
+    [key: string]: string | undefined;
+  };
+};
+
+export type ComplianceNoticesPayload = {
+  version: string;
+  context: "workspace" | "export" | string;
+  generated_at: string;
+  notices: ComplianceNotice[];
+  data_freshness: {
+    timestamp?: string;
+    source?: string;
+    materialized_at?: string | null;
+    age_hours?: number | null;
+    status?: "fresh" | "stale" | "outdated" | "unknown" | string;
+    hint?: { en?: string; zh?: string; [key: string]: string | undefined };
+    [key: string]: unknown;
+  };
+  source_credibility: {
+    level?: "normal" | "medium_risk" | "high_risk" | string;
+    summary?: { healthy?: number; degraded?: number; blocked?: number };
+    updated_at?: string;
+    hint?: { en?: string; zh?: string; [key: string]: string | undefined };
+    sources?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
 };
 
 export type InferResponse = {
@@ -215,6 +391,10 @@ export async function getLayers(timestamp: string) {
   return apiFetch<{ timestamp: string; layers: LayerInfo[] }>(`/layers?timestamp=${encodeURIComponent(timestamp)}`);
 }
 
+export async function getVesselProfiles() {
+  return apiFetch<{ default_profile_id: string; profiles: VesselProfile[] }>("/vessels/profiles");
+}
+
 export async function planRoute(payload: RoutePlanRequest) {
   return apiFetch<RoutePlanResponse>("/route/plan", {
     method: "POST",
@@ -234,6 +414,9 @@ export async function planLatestRoute(payload: {
   hour?: number;
   force_refresh?: boolean;
   progress_id?: string;
+  dynamic_replan_enabled?: boolean;
+  dynamic_window?: number;
+  dynamic_advance_steps?: number;
   start: { lat: number; lon: number };
   goal: { lat: number; lon: number };
   policy: {
@@ -243,6 +426,21 @@ export async function planLatestRoute(payload: {
     corridor_bias: number;
     smoothing: boolean;
     planner?: string;
+    risk_mode?: "conservative" | "balanced" | "aggressive" | string;
+    risk_weight_scale?: number;
+    risk_constraint_mode?: "none" | "chance" | "cvar" | string;
+    risk_budget?: number;
+    confidence_level?: number;
+    return_candidates?: boolean;
+    candidate_limit?: number;
+    dynamic_risk_switch_enabled?: boolean;
+    dynamic_risk_budget_km?: number;
+    dynamic_risk_warn_ratio?: number;
+    dynamic_risk_hard_ratio?: number;
+    dynamic_risk_warn_mode?: "conservative" | "balanced" | "aggressive" | string;
+    dynamic_risk_hard_mode?: "conservative" | "balanced" | "aggressive" | string;
+    dynamic_risk_switch_min_interval?: number;
+    vessel_profile_id?: string;
   };
 }) {
   return apiFetch<RoutePlanResponse>("/latest/plan", {
@@ -252,6 +450,9 @@ export async function planLatestRoute(payload: {
       hour: payload.hour ?? 12,
       force_refresh: payload.force_refresh ?? true,
       progress_id: payload.progress_id,
+      dynamic_replan_enabled: payload.dynamic_replan_enabled ?? false,
+      dynamic_window: payload.dynamic_window ?? 6,
+      dynamic_advance_steps: payload.dynamic_advance_steps ?? 12,
       start: payload.start,
       goal: payload.goal,
       policy: payload.policy,
@@ -333,6 +534,31 @@ export async function getGalleryList() {
 
 export async function getGalleryItem(galleryId: string) {
   return apiFetch<GalleryItem>(`/gallery/${encodeURIComponent(galleryId)}`);
+}
+
+export async function getGalleryRiskReport(galleryId: string) {
+  return apiFetch<GalleryRiskReport>(`/gallery/${encodeURIComponent(galleryId)}/risk-report`);
+}
+
+export async function getComplianceNotices(payload: { context: "workspace" | "export"; timestamp?: string }) {
+  const params = new URLSearchParams();
+  params.set("context", payload.context);
+  if (payload.timestamp) params.set("timestamp", payload.timestamp);
+  return apiFetch<ComplianceNoticesPayload>(`/compliance/notices?${params.toString()}`);
+}
+
+export async function getGalleryReportTemplate(
+  galleryId: string,
+  format: "json" | "csv" | "markdown" = "json"
+): Promise<Record<string, unknown> | string> {
+  const res = await fetch(`${API_BASE}/gallery/${encodeURIComponent(galleryId)}/report-template?format=${encodeURIComponent(format)}`);
+  if (!res.ok) {
+    await throwApiError(res);
+  }
+  if (format === "json") {
+    return (await res.json()) as Record<string, unknown>;
+  }
+  return res.text();
 }
 
 export async function deleteGalleryItem(galleryId: string) {

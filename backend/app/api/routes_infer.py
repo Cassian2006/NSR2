@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from app.core.config import get_settings
 from app.core.dataset import normalize_timestamp
 from app.core.schemas import InferRequest
+from app.core.versioning import build_version_snapshot
 from app.model.infer import InferenceError, run_unet_inference
 
 
@@ -14,6 +15,7 @@ router = APIRouter(tags=["infer"])
 @router.post("/infer")
 def infer(payload: InferRequest) -> dict:
     settings = get_settings()
+    version_snapshot = build_version_snapshot(settings=settings, model_version=payload.model_version)
     try:
         timestamp = normalize_timestamp(payload.timestamp)
     except ValueError as exc:
@@ -35,4 +37,5 @@ def infer(payload: InferRequest) -> dict:
         "timestamp": timestamp,
         "output_file": str(output_path),
         "stats": stats,
+        "version_snapshot": version_snapshot,
     }

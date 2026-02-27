@@ -109,7 +109,7 @@ def test_dynamic_route_prefers_incremental_dstar_for_small_changes(monkeypatch) 
         "t2": _state("t2", geo, b2),
     }
 
-    def _fake_load_grid_state(*, settings, timestamp, model_version, blocked_sources, caution_mode):
+    def _fake_load_grid_state(*, settings, timestamp, model_version, blocked_sources, caution_mode, **kwargs):
         return states[timestamp]
 
     monkeypatch.setattr(router, "_load_grid_state", _fake_load_grid_state)

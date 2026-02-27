@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
+from app.core.config import Settings
+from app.core.uncertainty_runtime import (
+    build_uncertainty_penalty_map,
+    calibrate_uncertainty_grid,
+    load_uncertainty_calibration_profile,
+)
 from app.model.uncertainty_calibration import (
     calibrate_confidence,
     expected_calibration_error,
@@ -49,3 +58,60 @@ def test_ece_tracks_nonperfect_calibration() -> None:
     conf, y = _make_overconfident_case(n=1500)
     ece = expected_calibration_error(conf, y, n_bins=15)
     assert ece >= 0.0
+
+
+def _settings_for_tmp(tmp_path: Path) -> Settings:
+    return Settings(
+        project_root=tmp_path,
+        data_root=tmp_path / "data",
+        outputs_root=tmp_path / "outputs",
+        processed_samples_root=tmp_path / "data" / "processed" / "samples",
+        annotation_pack_root=tmp_path / "data" / "processed" / "annotation_pack",
+        env_grids_root=tmp_path / "data" / "interim" / "env_grids",
+        dataset_index_path=tmp_path / "data" / "processed" / "dataset" / "index.json",
+        timestamps_index_path=tmp_path / "data" / "processed" / "timestamps_index.json",
+        grid_spec_path=tmp_path / "data" / "processed" / "grid_spec.json",
+        ais_heatmap_root=tmp_path / "data" / "ais_heatmap",
+        gallery_root=tmp_path / "outputs" / "gallery",
+        pred_root=tmp_path / "outputs" / "pred",
+        allow_demo_fallback=False,
+    )
+
+
+def test_runtime_profile_loader_from_stable_calibration_file(tmp_path: Path) -> None:
+    settings = _settings_for_tmp(tmp_path)
+    profile_path = settings.outputs_root / "calibration" / "unet_v1" / "calibration.json"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        json.dumps(
+            {
+                "profile": {
+                    "model_version": "unet_v1",
+                    "temperature": 1.3,
+                    "uncertainty_threshold": 0.62,
+                    "uplift_scale": 0.4,
+                    "ece_before": 0.12,
+                    "ece_after": 0.09,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    profile = load_uncertainty_calibration_profile(settings=settings, model_version="unet_v1")
+    assert profile.available is True
+    assert abs(profile.temperature - 1.3) < 1e-6
+    assert abs(profile.uncertainty_threshold - 0.62) < 1e-6
+    assert abs(profile.uplift_scale - 0.4) < 1e-6
+
+
+def test_calibrated_uncertainty_penalty_monotonic_above_threshold() -> None:
+    unc = np.array([[0.10, 0.45], [0.70, 0.95]], dtype=np.float32)
+    unc_cal = calibrate_uncertainty_grid(unc, temperature=1.0)
+    penalty = build_uncertainty_penalty_map(unc_cal, threshold=0.6, uplift_scale=0.5)
+    assert penalty.shape == unc.shape
+    assert np.all(penalty >= 0.0)
+    assert float(penalty[0, 0]) == 0.0
+    assert float(penalty[0, 1]) == 0.0
+    assert float(penalty[1, 0]) > 0.0
+    assert float(penalty[1, 1]) >= float(penalty[1, 0])

@@ -13,6 +13,7 @@ from uuid import uuid4
 import numpy as np
 
 from app.core.config import get_settings
+from app.core.versioning import normalize_version_snapshot
 
 
 _PLACEHOLDER_PNG_BASE64 = (
@@ -224,6 +225,7 @@ def _build_preview_png(payload: dict[str, Any]) -> bytes:
 class GalleryService:
     def __init__(self) -> None:
         settings = get_settings()
+        self.settings = settings
         self.run_dir = settings.gallery_root / "runs"
         self.thumb_dir = settings.gallery_root / "thumbs"
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -239,6 +241,11 @@ class GalleryService:
         gallery_id = uuid4().hex[:12]
         now = datetime.now(UTC).isoformat()
         record = {"id": gallery_id, "created_at": now, **payload}
+        normalize_version_snapshot(
+            record,
+            settings=self.settings,
+            model_version=str(record.get("model_version", "unet_v1")),
+        )
         with self._run_path(gallery_id).open("w", encoding="utf-8") as f:
             json.dump(record, f, ensure_ascii=False, indent=2)
         image_path = self._image_path(gallery_id)
@@ -257,6 +264,11 @@ class GalleryService:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
+            normalize_version_snapshot(
+                data,
+                settings=self.settings,
+                model_version=str(data.get("model_version", "unet_v1")),
+            )
             items.append(data)
         items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return items
@@ -265,7 +277,13 @@ class GalleryService:
         path = self._run_path(gallery_id)
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        normalize_version_snapshot(
+            data,
+            settings=self.settings,
+            model_version=str(data.get("model_version", "unet_v1")),
+        )
+        return data
 
     def get_image_bytes(self, gallery_id: str) -> bytes | None:
         path = self._image_path(gallery_id)

@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.core.dataset import get_dataset_service, normalize_timestamp, ui_timestamp
 from app.core.data_quality import build_data_quality_report
+from app.core.datasets_registry import build_datasets_registry
+from app.core.risk_field import get_risk_summary
 from app.core.render import GridBounds, parse_bbox, parse_size, render_overlay_png, render_tile_png, tile_bbox
 from app.core.config import get_settings
 
@@ -21,6 +23,47 @@ def get_datasets() -> dict:
 def get_datasets_quality(sample_limit: int = Query(default=80, ge=8, le=500)) -> dict:
     settings = get_settings()
     return build_data_quality_report(settings=settings, sample_limit=sample_limit)
+
+
+@router.get("/datasets/registry")
+def get_datasets_registry(
+    month: str | None = Query(default=None, examples=["2024-07", "all"]),
+    source: str | None = Query(default=None, examples=["copernicus_live", "remote_snapshot"]),
+    is_complete: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    settings = get_settings()
+    return build_datasets_registry(
+        settings=settings,
+        month=month,
+        source=source,
+        is_complete=is_complete,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/risk/summary")
+def risk_summary(
+    timestamp: str = Query(...),
+    model_version: str = Query(default="unet_v1"),
+    force_refresh: bool = Query(default=False),
+) -> dict:
+    settings = get_settings()
+    try:
+        normalized = normalize_timestamp(timestamp)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return get_risk_summary(
+            settings=settings,
+            timestamp=normalized,
+            model_version=model_version,
+            force_refresh=force_refresh,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"risk summary unavailable: {exc}") from exc
 
 
 @router.get("/timestamps")

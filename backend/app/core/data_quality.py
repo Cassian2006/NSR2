@@ -13,6 +13,40 @@ from app.core.config import Settings
 
 TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}$")
 TS_FMT = "%Y-%m-%d_%H"
+STATUS_RANK = {"pass": 2, "warn": 1, "fail": 0}
+CRITICAL_CHECKS = {"required_files_coverage", "shape_consistency", "timeline_continuity"}
+CHECK_POLICY: dict[str, dict[str, str]] = {
+    "required_files_coverage": {
+        "severity": "critical",
+        "fail_action": "block_release",
+        "warn_action": "manual_review",
+        "fix_hint": "补齐缺失的 x_stack.npy / blocked_mask.npy，并重跑数据构建。",
+    },
+    "shape_consistency": {
+        "severity": "critical",
+        "fail_action": "block_release",
+        "warn_action": "manual_review",
+        "fix_hint": "统一网格 shape 后再进入渲染/训练链路。",
+    },
+    "timeline_continuity": {
+        "severity": "critical",
+        "fail_action": "block_release",
+        "warn_action": "manual_review",
+        "fix_hint": "修复时间轴错位/大间断，重建 timestamps index。",
+    },
+    "auxiliary_layers_coverage": {
+        "severity": "degradable",
+        "fail_action": "degrade_to_warn",
+        "warn_action": "allow_with_warning",
+        "fix_hint": "补齐 AIS / UNet 缓存，或开启按需推理缓存策略。",
+    },
+    "numeric_quality_sampled": {
+        "severity": "degradable",
+        "fail_action": "degrade_to_warn",
+        "warn_action": "allow_with_warning",
+        "fix_hint": "排查异常 NaN/Inf 比例，清洗异常样本。",
+    },
+}
 
 
 def _status(score: float) -> str:
@@ -44,6 +78,69 @@ def _find_ais(settings: Settings, ts: str) -> Path | None:
     return None
 
 
+def _check_with_policy(*, name: str, status: str, detail: dict[str, Any]) -> dict[str, Any]:
+    policy = CHECK_POLICY.get(
+        name,
+        {
+            "severity": "degradable",
+            "fail_action": "degrade_to_warn",
+            "warn_action": "allow_with_warning",
+            "fix_hint": "查看该检查明细并按数据契约修复。",
+        },
+    )
+    effective_status = status
+    if status == "fail" and policy["severity"] != "critical":
+        # Non-critical fails are downgraded to warn to avoid hard blocking.
+        effective_status = "warn"
+    return {
+        "name": name,
+        "status": effective_status,
+        "raw_status": status,
+        "severity": policy["severity"],
+        "action": policy["fail_action"] if status == "fail" else policy["warn_action"] if status == "warn" else "none",
+        "fix_hint": policy["fix_hint"],
+        "detail": detail,
+    }
+
+
+def build_data_quality_gate(report: dict[str, Any]) -> dict[str, Any]:
+    checks = [c for c in report.get("checks", []) if isinstance(c, dict)]
+    blockers = [
+        c["name"]
+        for c in checks
+        if str(c.get("severity", "degradable")) == "critical" and str(c.get("status", "pass")) != "pass"
+    ]
+    warnings = [c["name"] for c in checks if str(c.get("status", "pass")) == "warn"]
+    fails = [c["name"] for c in checks if str(c.get("status", "pass")) == "fail"]
+
+    if blockers:
+        status = "FAIL"
+        block_release = True
+    elif warnings or fails:
+        status = "WARN"
+        block_release = False
+    else:
+        status = "PASS"
+        block_release = False
+
+    actions: list[str] = []
+    if status == "FAIL":
+        actions.append("阻断发布：先修复 critical 检查项后再继续。")
+    elif status == "WARN":
+        actions.append("允许降级运行：记录告警并安排补数/重算。")
+    else:
+        actions.append("质量通过：可进入下一阶段。")
+
+    return {
+        "status": status,
+        "block_release": block_release,
+        "blockers": blockers,
+        "warnings": warnings,
+        "fails": fails,
+        "actions": actions,
+    }
+
+
 def build_data_quality_report(
     *,
     settings: Settings,
@@ -60,14 +157,25 @@ def build_data_quality_report(
     issues: list[str] = []
 
     if not timestamps:
+        empty_gate = {
+            "status": "FAIL",
+            "block_release": True,
+            "blockers": ["required_files_coverage"],
+            "warnings": [],
+            "fails": ["required_files_coverage"],
+            "actions": ["阻断发布：annotation_pack 为空，先补齐样本。"],
+        }
         return {
             "summary": {
                 "status": "fail",
+                "gate_status": empty_gate["status"],
+                "block_release": empty_gate["block_release"],
                 "message": "No annotation_pack timestamps found",
                 "timestamp_count": 0,
             },
             "checks": [],
             "issues": ["annotation_pack_empty"],
+            "gate": empty_gate,
         }
 
     x_present = 0
@@ -105,15 +213,15 @@ def build_data_quality_report(
 
     ts_count = len(timestamps)
     checks.append(
-        {
-            "name": "required_files_coverage",
-            "status": _status(min(x_present, blocked_present) / ts_count),
-            "detail": {
+        _check_with_policy(
+            name="required_files_coverage",
+            status=_status(min(x_present, blocked_present) / ts_count),
+            detail={
                 "timestamps": ts_count,
                 "x_stack_present": x_present,
                 "blocked_mask_present": blocked_present,
             },
-        }
+        )
     )
 
     dominant_x_shape = max(x_shapes, key=x_shapes.get) if x_shapes else None
@@ -121,10 +229,10 @@ def build_data_quality_report(
     x_consistency = (x_shapes.get(dominant_x_shape, 0) / x_present) if (dominant_x_shape and x_present) else 0.0
     b_consistency = (blocked_shapes.get(dominant_b_shape, 0) / blocked_present) if (dominant_b_shape and blocked_present) else 0.0
     checks.append(
-        {
-            "name": "shape_consistency",
-            "status": _status(min(x_consistency, b_consistency)),
-            "detail": {
+        _check_with_policy(
+            name="shape_consistency",
+            status=_status(min(x_consistency, b_consistency)),
+            detail={
                 "dominant_x_shape": list(dominant_x_shape) if dominant_x_shape else None,
                 "dominant_blocked_shape": list(dominant_b_shape) if dominant_b_shape else None,
                 "x_shape_variants": len(x_shapes),
@@ -132,7 +240,7 @@ def build_data_quality_report(
                 "x_consistency": round(float(x_consistency), 4),
                 "blocked_consistency": round(float(b_consistency), 4),
             },
-        }
+        )
     )
 
     pred_cov = float(pred_present / ts_count)
@@ -144,19 +252,19 @@ def build_data_quality_report(
     if aux_status == "pass" and (pred_cov < 0.3 or unc_cov < 0.2):
         aux_status = "warn"
     checks.append(
-        {
-            "name": "auxiliary_layers_coverage",
-            "status": aux_status,
-            "detail": {
+        _check_with_policy(
+            name="auxiliary_layers_coverage",
+            status=aux_status,
+            detail={
                 "pred_present": pred_present,
                 "uncertainty_present": unc_present,
                 "ais_present": ais_present,
                 "pred_coverage": round(pred_cov, 4),
                 "uncertainty_coverage": round(unc_cov, 4),
                 "ais_coverage": round(ais_cov, 4),
-                "note": "low pred/unc coverage is warning-only when AIS coverage is high (on-demand inference supported)",
+                "note": "auxiliary coverage is degradable; missing cache should warn, not hard fail.",
             },
-        }
+        )
     )
 
     # Temporal continuity check.
@@ -182,16 +290,16 @@ def build_data_quality_report(
         ]
         continuity = 1.0 - float(len(large_gaps) / max(1, len(deltas)))
     checks.append(
-        {
-            "name": "timeline_continuity",
-            "status": _status(continuity),
-            "detail": {
+        _check_with_policy(
+            name="timeline_continuity",
+            status=_status(continuity),
+            detail={
                 "median_step_hours": round(median_delta, 3),
                 "gap_count": len(large_gaps),
                 "largest_gap_hours": round(float(np.max(deltas)) if deltas.size else 0.0, 3),
                 "sample_gaps": large_gaps[:20],
             },
-        }
+        )
     )
 
     # Numeric quality sampling.
@@ -246,10 +354,10 @@ def build_data_quality_report(
     if channel_var > 1:
         numeric_score *= 0.7
     checks.append(
-        {
-            "name": "numeric_quality_sampled",
-            "status": _status(numeric_score),
-            "detail": {
+        _check_with_policy(
+            name="numeric_quality_sampled",
+            status=_status(numeric_score),
+            detail={
                 "sampled_timestamps": len(sample_ts),
                 "nan_ratio_mean": round(nan_mean, 6) if np.isfinite(nan_mean) else None,
                 "nan_ratio_p95": round(nan_p95, 6) if np.isfinite(nan_p95) else None,
@@ -261,21 +369,23 @@ def build_data_quality_report(
                 "channel_count_variants": channel_var,
                 "channel_count_values": sorted(list(set(channel_counts)))[:10],
             },
-        }
+        )
     )
 
     for c in checks:
         if c["status"] != "pass":
             issues.append(c["name"])
 
-    status_rank = {"pass": 2, "warn": 1, "fail": 0}
-    overall = min(checks, key=lambda c: status_rank.get(str(c.get("status")), 0))["status"] if checks else "fail"
+    overall = min(checks, key=lambda c: STATUS_RANK.get(str(c.get("status")), 0))["status"] if checks else "fail"
+    gate = build_data_quality_gate({"checks": checks})
     summary = {
         "status": overall,
+        "gate_status": gate["status"],
+        "block_release": gate["block_release"],
         "timestamp_count": ts_count,
         "month_counts": month_counts,
         "first_timestamp": timestamps[0],
         "last_timestamp": timestamps[-1],
         "issues_count": len(issues),
     }
-    return {"summary": summary, "checks": checks, "issues": issues}
+    return {"summary": summary, "checks": checks, "issues": issues, "gate": gate}
