@@ -29,8 +29,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
 
       - name: Repro Pipeline Smoke
         run: |
@@ -40,3 +39,24 @@ jobs:
         run: |
           python -m pytest -q tests/test_run_snapshot.py tests/test_data_quality_gate.py tests/test_datasets_registry_api.py
 
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Production Build
+        run: npm run build

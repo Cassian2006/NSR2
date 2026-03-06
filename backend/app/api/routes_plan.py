@@ -258,7 +258,10 @@ def plan_route(payload: RoutePlanRequest) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     requested_policy = payload.policy.model_dump()
-    policy_data, vessel_profile, vessel_adjustments = apply_vessel_profile_to_policy(requested_policy)
+    policy_data, vessel_profile, vessel_adjustments = apply_vessel_profile_to_policy(
+        requested_policy,
+        preserve_explicit=True,
+    )
     start_rc = (payload.start.lat, payload.start.lon)
     goal_rc = (payload.goal.lat, payload.goal.lon)
     try:
@@ -412,7 +415,10 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
         raise HTTPException(status_code=422, detail="Dynamic route planning requires at least 2 timestamps.")
 
     requested_policy = payload.policy.model_dump()
-    policy_data, vessel_profile, vessel_adjustments = apply_vessel_profile_to_policy(requested_policy)
+    policy_data, vessel_profile, vessel_adjustments = apply_vessel_profile_to_policy(
+        requested_policy,
+        preserve_explicit=True,
+    )
 
     try:
         result = plan_grid_route_dynamic(

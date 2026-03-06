@@ -228,14 +228,32 @@ class GalleryService:
         self.settings = settings
         self.run_dir = settings.gallery_root / "runs"
         self.thumb_dir = settings.gallery_root / "thumbs"
+        self.trash_run_dir = settings.gallery_root / "trash" / "runs"
+        self.trash_thumb_dir = settings.gallery_root / "trash" / "thumbs"
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
+        self.trash_run_dir.mkdir(parents=True, exist_ok=True)
+        self.trash_thumb_dir.mkdir(parents=True, exist_ok=True)
 
     def _run_path(self, gallery_id: str) -> Path:
         return self.run_dir / f"{gallery_id}.json"
 
     def _image_path(self, gallery_id: str) -> Path:
         return self.thumb_dir / f"{gallery_id}.png"
+
+    def _trash_run_path(self, gallery_id: str, stamp: str) -> Path:
+        return self.trash_run_dir / f"{gallery_id}__{stamp}.json"
+
+    def _trash_image_path(self, gallery_id: str, stamp: str) -> Path:
+        return self.trash_thumb_dir / f"{gallery_id}__{stamp}.png"
+
+    def _latest_trash_run_path(self, gallery_id: str) -> Path | None:
+        candidates = sorted(self.trash_run_dir.glob(f"{gallery_id}__*.json"), reverse=True)
+        return candidates[0] if candidates else None
+
+    def _latest_trash_image_path(self, gallery_id: str) -> Path | None:
+        candidates = sorted(self.trash_thumb_dir.glob(f"{gallery_id}__*.png"), reverse=True)
+        return candidates[0] if candidates else None
 
     def create(self, payload: dict[str, Any]) -> str:
         gallery_id = uuid4().hex[:12]
@@ -273,6 +291,24 @@ class GalleryService:
         items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return items
 
+    def list_deleted_items(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for path in self.trash_run_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            data.setdefault("deleted_at", datetime.now(UTC).isoformat())
+            data.setdefault("deleted_path", str(path))
+            normalize_version_snapshot(
+                data,
+                settings=self.settings,
+                model_version=str(data.get("model_version", "unet_v1")),
+            )
+            items.append(data)
+        items.sort(key=lambda x: str(x.get("deleted_at") or x.get("created_at") or ""), reverse=True)
+        return items
+
     def get_item(self, gallery_id: str) -> dict[str, Any] | None:
         path = self._run_path(gallery_id)
         if not path.exists():
@@ -302,14 +338,49 @@ class GalleryService:
         self._image_path(gallery_id).write_bytes(image_bytes)
         return True
 
-    def delete(self, gallery_id: str) -> bool:
+    def delete(self, gallery_id: str, *, soft_delete: bool = True) -> bool:
         existed = False
         run_path = self._run_path(gallery_id)
+        image_path = self._image_path(gallery_id)
+        if soft_delete:
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+            if run_path.exists():
+                record = json.loads(run_path.read_text(encoding="utf-8"))
+                record["deleted_at"] = datetime.now(UTC).isoformat()
+                record["deleted_reason"] = "user_delete"
+                with self._trash_run_path(gallery_id, stamp).open("w", encoding="utf-8") as f:
+                    json.dump(record, f, ensure_ascii=False, indent=2)
+                run_path.unlink()
+                existed = True
+            if image_path.exists():
+                image_path.replace(self._trash_image_path(gallery_id, stamp))
+                existed = True
+            return existed
+
         if run_path.exists():
             run_path.unlink()
             existed = True
-        image_path = self._image_path(gallery_id)
         if image_path.exists():
             image_path.unlink()
             existed = True
         return existed
+
+    def restore(self, gallery_id: str) -> bool:
+        if self._run_path(gallery_id).exists():
+            return False
+        run_trash_path = self._latest_trash_run_path(gallery_id)
+        if run_trash_path is None or not run_trash_path.exists():
+            return False
+
+        record = json.loads(run_trash_path.read_text(encoding="utf-8"))
+        record.pop("deleted_at", None)
+        record.pop("deleted_reason", None)
+        record.pop("deleted_path", None)
+        with self._run_path(gallery_id).open("w", encoding="utf-8") as f:
+            json.dump(record, f, ensure_ascii=False, indent=2)
+        run_trash_path.unlink(missing_ok=True)
+
+        image_trash_path = self._latest_trash_image_path(gallery_id)
+        if image_trash_path is not None and image_trash_path.exists():
+            image_trash_path.replace(self._image_path(gallery_id))
+        return True

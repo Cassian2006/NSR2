@@ -31,6 +31,25 @@ def test_apply_vessel_profile_to_policy_arc7() -> None:
     assert adjustments["applied_corridor_bias"] <= adjustments["requested_corridor_bias"]
 
 
+def test_apply_vessel_profile_preserves_explicit_policy_when_requested() -> None:
+    policy = {
+        "planner": "dstar_lite",
+        "risk_mode": "aggressive",
+        "risk_weight_scale": 0.8,
+        "risk_budget": 0.91,
+        "confidence_level": 0.88,
+        "corridor_bias": 0.2,
+        "vessel_profile_id": "arc7_lng",
+    }
+    effective, vessel, adjustments = apply_vessel_profile_to_policy(policy, preserve_explicit=True)
+    assert vessel["id"] == "arc7_lng"
+    assert effective["risk_mode"] == "aggressive"
+    assert effective["risk_weight_scale"] == 0.8
+    assert effective["risk_budget"] == 0.91
+    assert effective["confidence_level"] == 0.88
+    assert adjustments["applied_risk_mode"] == "aggressive"
+
+
 def test_vessels_profile_api() -> None:
     client = TestClient(app)
     resp = client.get("/v1/vessels/profiles")

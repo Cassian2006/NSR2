@@ -117,29 +117,36 @@ def get_vessel_profile(profile_id: str | None) -> VesselProfile:
 
 
 
-def apply_vessel_profile_to_policy(policy: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def apply_vessel_profile_to_policy(
+    policy: dict[str, Any],
+    *,
+    preserve_explicit: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     effective = dict(policy)
     profile = get_vessel_profile(effective.get("vessel_profile_id"))
     requested_corridor_bias = float(effective.get("corridor_bias", 0.2))
     effective_corridor_bias = max(0.0, min(1.0, requested_corridor_bias * float(profile.corridor_bias_multiplier)))
 
-    effective.update(
-        {
-            "vessel_profile_id": profile.id,
-            "risk_mode": profile.risk_mode,
-            "risk_weight_scale": float(profile.risk_weight_scale),
-            "risk_budget": float(profile.risk_budget),
-            "confidence_level": float(profile.confidence_level),
-            "corridor_bias": effective_corridor_bias,
-        }
-    )
+    effective["vessel_profile_id"] = profile.id
+    effective["corridor_bias"] = effective_corridor_bias
+
+    policy_defaults = {
+        "risk_mode": profile.risk_mode,
+        "risk_weight_scale": float(profile.risk_weight_scale),
+        "risk_budget": float(profile.risk_budget),
+        "confidence_level": float(profile.confidence_level),
+    }
+    for key, value in policy_defaults.items():
+        if preserve_explicit and key in policy:
+            continue
+        effective[key] = value
 
     adjustments = {
         "requested_corridor_bias": requested_corridor_bias,
         "applied_corridor_bias": effective_corridor_bias,
-        "applied_risk_mode": profile.risk_mode,
-        "applied_risk_weight_scale": float(profile.risk_weight_scale),
-        "applied_risk_budget": float(profile.risk_budget),
-        "applied_confidence_level": float(profile.confidence_level),
+        "applied_risk_mode": str(effective.get("risk_mode", profile.risk_mode)),
+        "applied_risk_weight_scale": float(effective.get("risk_weight_scale", profile.risk_weight_scale)),
+        "applied_risk_budget": float(effective.get("risk_budget", profile.risk_budget)),
+        "applied_confidence_level": float(effective.get("confidence_level", profile.confidence_level)),
     }
     return effective, profile.to_json(), adjustments

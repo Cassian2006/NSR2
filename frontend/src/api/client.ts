@@ -532,6 +532,10 @@ export async function getGalleryList() {
   return apiFetch<{ items: GalleryItem[] }>("/gallery/list");
 }
 
+export async function getDeletedGalleryList() {
+  return apiFetch<{ items: GalleryItem[] }>("/gallery/deleted");
+}
+
 export async function getGalleryItem(galleryId: string) {
   return apiFetch<GalleryItem>(`/gallery/${encodeURIComponent(galleryId)}`);
 }
@@ -561,13 +565,25 @@ export async function getGalleryReportTemplate(
   return res.text();
 }
 
-export async function deleteGalleryItem(galleryId: string) {
-  const res = await fetch(`${API_BASE}/gallery/${encodeURIComponent(galleryId)}`, {
+export async function deleteGalleryItem(galleryId: string, softDelete = true) {
+  const query = `?soft_delete=${softDelete ? "true" : "false"}`;
+  const res = await fetch(`${API_BASE}/gallery/${encodeURIComponent(galleryId)}${query}`, {
     method: "DELETE",
   });
   if (!res.ok) {
     await throwApiError(res);
   }
+}
+
+export async function restoreGalleryItem(galleryId: string) {
+  const res = await fetch(`${API_BASE}/gallery/${encodeURIComponent(galleryId)}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    await throwApiError(res);
+  }
+  return (await res.json()) as { ok: boolean; gallery_id: string };
 }
 
 export async function uploadGalleryImage(galleryId: string, imageBase64: string) {

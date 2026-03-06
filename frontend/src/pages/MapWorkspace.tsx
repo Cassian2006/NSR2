@@ -457,6 +457,32 @@ export default function MapWorkspace() {
     }),
     [routeMetrics]
   );
+  const riskConstraintModeResult = String((routeMetrics as any)?.risk_constraint_mode ?? "none");
+  const riskConstraintSatisfiedResult = Boolean((routeMetrics as any)?.risk_constraint_satisfied ?? true);
+  const riskBudgetUsagePctResult = Number((routeMetrics as any)?.risk_budget_usage ?? 0) * 100;
+  const riskConstraintMetricResult = Number((routeMetrics as any)?.risk_constraint_metric ?? 0);
+  const safetyBanner = useMemo(() => {
+    if (!routeMetrics) return null;
+    if (riskConstraintModeResult === "none") {
+      return {
+        tone: "neutral" as const,
+        title: t("summary.riskConstraint.none.title"),
+        desc: t("summary.riskConstraint.none.desc"),
+      };
+    }
+    if (riskConstraintSatisfiedResult) {
+      return {
+        tone: "pass" as const,
+        title: t("summary.riskConstraint.pass.title"),
+        desc: `${t("summary.riskConstraint.usage")} ${riskBudgetUsagePctResult.toFixed(1)}%，${t("summary.riskConstraint.metric")} ${riskConstraintMetricResult.toFixed(4)}`,
+      };
+    }
+    return {
+      tone: "fail" as const,
+      title: t("summary.riskConstraint.fail.title"),
+      desc: `${t("summary.riskConstraint.usage")} ${riskBudgetUsagePctResult.toFixed(1)}%，${t("summary.riskConstraint.metric")} ${riskConstraintMetricResult.toFixed(4)}`,
+    };
+  }, [riskBudgetUsagePctResult, riskConstraintMetricResult, riskConstraintModeResult, riskConstraintSatisfiedResult, routeMetrics, t]);
 
   const latestPhaseText = useMemo(() => {
     const phase = latestProgress.phase || "unknown";
@@ -1647,13 +1673,39 @@ export default function MapWorkspace() {
                     <StatCard label={t("summary.caution")} value={routeSummary.cautionPct} unit="%" variant="warning" />
                   </div>
                   <StatCard label={t("summary.alignment")} value={routeSummary.alignment.toFixed(2)} variant="success" />
-                  <div className="p-3 rounded-lg border border-green-200 bg-green-50 flex items-start gap-2">
-                    <CheckCircle2 className="size-4 text-green-600 mt-0.5 flex-shrink-0" />
-                    <div className="text-sm text-green-800">
-                      <div className="font-medium mb-1">{t("summary.noViolations")}</div>
-                      <div className="text-xs">{t("summary.noViolations.desc")}</div>
+                  {safetyBanner ? (
+                    <div
+                      className={`p-3 rounded-lg border flex items-start gap-2 ${
+                        safetyBanner.tone === "pass"
+                          ? "border-green-200 bg-green-50"
+                          : safetyBanner.tone === "fail"
+                            ? "border-red-200 bg-red-50"
+                            : "border-slate-200 bg-slate-50"
+                      }`}
+                    >
+                      {safetyBanner.tone === "pass" ? (
+                        <CheckCircle2 className="size-4 text-green-600 mt-0.5 flex-shrink-0" />
+                      ) : (
+                        <AlertCircle
+                          className={`size-4 mt-0.5 flex-shrink-0 ${
+                            safetyBanner.tone === "fail" ? "text-red-600" : "text-slate-600"
+                          }`}
+                        />
+                      )}
+                      <div
+                        className={`text-sm ${
+                          safetyBanner.tone === "pass"
+                            ? "text-green-800"
+                            : safetyBanner.tone === "fail"
+                              ? "text-red-800"
+                              : "text-slate-700"
+                        }`}
+                      >
+                        <div className="font-medium mb-1">{safetyBanner.title}</div>
+                        <div className="text-xs">{safetyBanner.desc}</div>
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                   {routeResult.gallery_id ? (
                     <Button variant="outline" className="w-full" onClick={handleOpenLatestGallery}>
                       {t("workspace.openGallery")} ({routeResult.gallery_id})

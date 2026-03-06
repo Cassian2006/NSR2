@@ -457,6 +457,44 @@ def test_eval_ais_backtest(client: TestClient) -> None:
     assert 0.0 <= metrics["alignment_norm_0_1"] <= 1.0
 
 
+def test_gallery_soft_delete_and_restore(client: TestClient) -> None:
+    ts = _pick_timestamp(client)
+    plan_payload = {
+        "timestamp": ts,
+        "start": TEST_START,
+        "goal": TEST_GOAL,
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "tie_breaker",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+        },
+    }
+    plan = client.post("/v1/route/plan", json=plan_payload).json()
+    gallery_id = str(plan["gallery_id"])
+
+    delete_resp = client.delete(f"/v1/gallery/{gallery_id}", params={"soft_delete": "true"})
+    assert delete_resp.status_code == 204
+
+    active_resp = client.get("/v1/gallery/list")
+    assert active_resp.status_code == 200
+    active_ids = {str(item.get("id")) for item in active_resp.json().get("items", [])}
+    assert gallery_id not in active_ids
+
+    deleted_resp = client.get("/v1/gallery/deleted")
+    assert deleted_resp.status_code == 200
+    deleted_ids = {str(item.get("id")) for item in deleted_resp.json().get("items", [])}
+    assert gallery_id in deleted_ids
+
+    restore_resp = client.post(f"/v1/gallery/{gallery_id}/restore")
+    assert restore_resp.status_code == 200
+    assert restore_resp.json().get("ok") is True
+
+    restored_resp = client.get(f"/v1/gallery/{gallery_id}")
+    assert restored_resp.status_code == 200
+
+
 def test_infer_persists_file(client: TestClient) -> None:
     ts = _pick_timestamp(client)
     infer_resp = client.post(

@@ -1,29 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { Download, FileJson, Image, RefreshCw, Trash2 } from "lucide-react";
+import { Download, FileJson, Image, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
+  type AisBacktestMetrics,
   type ComplianceNoticesPayload,
   deleteGalleryItem,
-  getErrorMessage,
   getComplianceNotices,
-  getGalleryReportTemplate,
+  getDeletedGalleryList,
+  getErrorMessage,
   getGalleryImageUrl,
   getGalleryItem,
   getGalleryList,
+  getGalleryReportTemplate,
   getGalleryRiskReport,
+  restoreGalleryItem,
   runAisBacktest,
-  type AisBacktestMetrics,
   type GalleryItem,
   type GalleryRiskReport,
 } from "../api/client";
-import { useLanguage } from "../contexts/LanguageContext";
 import StatCard from "../components/StatCard";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "../components/ui/hover-card";
 import { Separator } from "../components/ui/separator";
+import { useLanguage } from "../contexts/LanguageContext";
 
 function downloadJsonFile(filename: string, payload: unknown) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
@@ -38,7 +40,7 @@ function downloadJsonFile(filename: string, payload: unknown) {
 async function downloadImageFile(filename: string, imageUrl: string) {
   const res = await fetch(imageUrl);
   if (!res.ok) {
-    throw new Error(`下载图片失败：HTTP ${res.status}`);
+    throw new Error(`Image download failed (HTTP ${res.status})`);
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -65,6 +67,7 @@ export default function ExportReport() {
   const queryGalleryId = searchParams.get("gallery");
 
   const [items, setItems] = useState<GalleryItem[]>([]);
+  const [deletedItems, setDeletedItems] = useState<GalleryItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
   const [riskReport, setRiskReport] = useState<GalleryRiskReport | null>(null);
@@ -78,15 +81,17 @@ export default function ExportReport() {
   const loadList = async () => {
     setLoadingList(true);
     try {
-      const res = await getGalleryList();
-      setItems(res.items ?? []);
-      if ((res.items ?? []).length === 0) {
+      const [activeRes, deletedRes] = await Promise.all([getGalleryList(), getDeletedGalleryList()]);
+      const activeItems = activeRes.items ?? [];
+      setItems(activeItems);
+      setDeletedItems(deletedRes.items ?? []);
+      if (!activeItems.length) {
         setSelectedId("");
       } else {
         setSelectedId((prev) => {
-          if (queryGalleryId && (res.items ?? []).some((it) => it.id === queryGalleryId)) return queryGalleryId;
-          if (prev && (res.items ?? []).some((it) => it.id === prev)) return prev;
-          return (res.items ?? [])[0].id;
+          if (queryGalleryId && activeItems.some((it) => it.id === queryGalleryId)) return queryGalleryId;
+          if (prev && activeItems.some((it) => it.id === prev)) return prev;
+          return activeItems[0].id;
         });
       }
     } catch (error) {
@@ -97,7 +102,7 @@ export default function ExportReport() {
   };
 
   useEffect(() => {
-    loadList();
+    void loadList();
   }, []);
 
   useEffect(() => {
@@ -123,11 +128,11 @@ export default function ExportReport() {
         if (active) setLoadingDetail(false);
       }
     }
-    loadDetail();
+    void loadDetail();
     return () => {
       active = false;
     };
-  }, [selectedId]);
+  }, [selectedId, t]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -145,7 +150,7 @@ export default function ExportReport() {
         if (active) setLoadingRiskReport(false);
       }
     }
-    loadRiskReport();
+    void loadRiskReport();
     return () => {
       active = false;
     };
@@ -157,7 +162,7 @@ export default function ExportReport() {
       return;
     }
     let active = true;
-    async function loadComplianceNotices() {
+    async function loadCompliance() {
       try {
         const payload = await getComplianceNotices({
           context: "export",
@@ -170,7 +175,7 @@ export default function ExportReport() {
         setComplianceNotices(null);
       }
     }
-    loadComplianceNotices();
+    void loadCompliance();
     return () => {
       active = false;
     };
@@ -180,18 +185,13 @@ export default function ExportReport() {
     if (!selectedItem || !selectedItem.distance_km || selectedItem.distance_km <= 0) return 0;
     return (selectedItem.caution_len_km / selectedItem.distance_km) * 100;
   }, [selectedItem]);
+
   const freshnessStatusKey =
     complianceNotices?.data_freshness?.status && ["fresh", "stale", "outdated", "unknown"].includes(String(complianceNotices.data_freshness.status))
       ? String(complianceNotices.data_freshness.status)
       : "unknown";
-  const freshnessHint =
-    complianceNotices?.data_freshness?.hint?.[language] ??
-    complianceNotices?.data_freshness?.hint?.en ??
-    "";
-  const sourceHealthHint =
-    complianceNotices?.source_credibility?.hint?.[language] ??
-    complianceNotices?.source_credibility?.hint?.en ??
-    "";
+  const freshnessHint = complianceNotices?.data_freshness?.hint?.[language] ?? complianceNotices?.data_freshness?.hint?.en ?? "";
+  const sourceHealthHint = complianceNotices?.source_credibility?.hint?.[language] ?? complianceNotices?.source_credibility?.hint?.en ?? "";
 
   const imageUrl = selectedItem ? getGalleryImageUrl(selectedItem.id) : "";
 
@@ -205,21 +205,31 @@ export default function ExportReport() {
     const r = item.result;
     const distance = Number(r?.distance_km ?? item.distance_km ?? 0).toFixed(1);
     const caution = Number(r?.caution_len_km ?? item.caution_len_km ?? 0).toFixed(1);
-    const rawStatus = String(r?.status ?? "success");
-    const status = rawStatus === "success" ? "成功" : rawStatus;
-    return `${status} | ${distance} km | 谨慎区 ${caution} km`;
+    const status = String(r?.status ?? "success");
+    return `${status} | ${distance} km | ${t("export.resultCaution")} ${caution} km`;
   };
 
   const handleDelete = async () => {
     if (!selectedItem) return;
-    const ok = window.confirm(`确定删除记录 ${selectedItem.id} 吗？`);
+    const ok = window.confirm(`${t("export.deleteConfirm.prefix")} ${selectedItem.id}${t("export.deleteConfirm.suffix")}`);
     if (!ok) return;
     try {
-      await deleteGalleryItem(selectedItem.id);
-      toast.success(t("toast.galleryDeleted"));
+      await deleteGalleryItem(selectedItem.id, true);
+      toast.success(t("toast.runMovedToRecycle"));
       await loadList();
     } catch (error) {
       toast.error(`${t("toast.deleteFailed")}: ${getErrorMessage(error)}`);
+    }
+  };
+
+  const handleRestore = async (galleryId: string) => {
+    try {
+      await restoreGalleryItem(galleryId);
+      toast.success(`${t("toast.runRestored")}: ${galleryId}`);
+      await loadList();
+      setSelectedId(galleryId);
+    } catch (error) {
+      toast.error(`${t("toast.restoreFailed")}: ${getErrorMessage(error)}`);
     }
   };
 
@@ -243,19 +253,19 @@ export default function ExportReport() {
 
   const handleDownloadRiskReport = () => {
     if (!selectedItem || !riskReport) {
-      toast.error("暂无风险报告可下载");
+      toast.error(t("export.noRiskReportDownload"));
       return;
     }
     downloadJsonFile(`risk_report_${selectedItem.id}.json`, {
       ...riskReport,
       compliance: riskReport.compliance ?? complianceNotices,
     });
-    toast.success("风险报告已下载");
+    toast.success(t("toast.riskReportDownloaded"));
   };
 
   const handleDownloadCandidateComparison = () => {
     if (!selectedItem || !riskReport) {
-      toast.error("暂无候选对比可下载");
+      toast.error(t("export.noCandidateCompareDownload"));
       return;
     }
     const payload = {
@@ -267,7 +277,7 @@ export default function ExportReport() {
       compliance: riskReport.compliance ?? complianceNotices,
     };
     downloadJsonFile(`candidate_compare_${selectedItem.id}.json`, payload);
-    toast.success("候选对比报告已下载");
+    toast.success(t("toast.candidateCompareDownloaded"));
   };
 
   const handleDownloadTemplate = async (format: "json" | "csv" | "markdown") => {
@@ -281,9 +291,9 @@ export default function ExportReport() {
       } else {
         downloadTextFile(`report_template_${selectedItem.id}.md`, String(payload), "text/markdown");
       }
-      toast.success("标准报告已下载");
+      toast.success(t("toast.reportTemplateDownloaded"));
     } catch (error) {
-      toast.error(`下载标准报告失败: ${getErrorMessage(error)}`);
+      toast.error(`${t("toast.reportTemplateDownloadFailed")}: ${getErrorMessage(error)}`);
     }
   };
 
@@ -319,7 +329,7 @@ export default function ExportReport() {
             <h1 className="mb-1">{t("export.title")}</h1>
             <p className="text-muted-foreground">{t("export.subtitle")}</p>
           </div>
-          <Button variant="outline" className="w-full gap-2 sm:w-auto" onClick={loadList} disabled={loadingList}>
+          <Button variant="outline" className="w-full gap-2 sm:w-auto" onClick={() => void loadList()} disabled={loadingList}>
             <RefreshCw className={`size-4 ${loadingList ? "animate-spin" : ""}`} />
             {t("export.refresh")}
           </Button>
@@ -329,7 +339,9 @@ export default function ExportReport() {
           <Card>
             <CardHeader>
               <CardTitle>{t("export.savedRuns")}</CardTitle>
-              <CardDescription>{items.length} 条记录</CardDescription>
+              <CardDescription>
+                {items.length} {t("export.active")} / {deletedItems.length} {t("export.deleted")}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {items.length === 0 ? (
@@ -349,33 +361,37 @@ export default function ExportReport() {
                           <div className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</div>
                           <div className="font-mono text-sm">{item.id}</div>
                           <div className="text-sm">{item.timestamp}</div>
-                          <div className="text-xs text-muted-foreground">输入：{getActionSummary(item)}</div>
-                          <div className="text-xs text-muted-foreground">结果：{getResultSummary(item)}</div>
+                          <div className="text-xs text-muted-foreground">{t("export.input")}: {getActionSummary(item)}</div>
+                          <div className="text-xs text-muted-foreground">{t("export.result")}: {getResultSummary(item)}</div>
                         </button>
                       </HoverCardTrigger>
                       <HoverCardContent className="w-[min(24rem,80vw)] space-y-2">
-                        <div className="text-sm font-semibold">路径规划详情</div>
-                        <div className="text-xs text-muted-foreground">输入</div>
+                        <div className="text-sm font-semibold">{t("export.runDetails")}</div>
+                        <div className="text-xs text-muted-foreground">{t("export.input")}</div>
                         <div className="text-xs font-mono">{getActionSummary(item)}</div>
-                        <div className="text-xs text-muted-foreground">
-                          策略：{String(item.action?.policy?.caution_mode ?? "tie_breaker")} | 禁行来源：{" "}
-                          {Array.isArray(item.action?.policy?.blocked_sources) ? item.action?.policy?.blocked_sources?.join(", ") : "无"} | 平滑：{" "}
-                          {item.action?.policy?.smoothing ? "是" : "否"} | 走廊偏好：{Number(item.action?.policy?.corridor_bias ?? item.corridor_bias ?? 0).toFixed(2)}
-                        </div>
-                        <div className="text-xs text-muted-foreground">结果</div>
-                        <div className="text-xs">{getResultSummary(item)}</div>
-                        <div className="text-xs text-muted-foreground">
-                          点数：{Number(item.result?.raw_points ?? item.explain?.raw_points ?? 0)} {"->"}{" "}
-                          {Number(item.result?.smoothed_points ?? item.explain?.smoothed_points ?? 0)} | 起终点自动调整：{" "}
-                          {item.result?.start_adjusted || item.explain?.start_adjusted ? "是" : "否"}/
-                          {item.result?.goal_adjusted || item.explain?.goal_adjusted ? "是" : "否"} | 走廊对齐：{" "}
-                          {Number(item.result?.corridor_alignment ?? item.explain?.corridor_alignment ?? 0).toFixed(3)}
-                        </div>
+                        <div className="text-xs text-muted-foreground">{t("export.result")}: {getResultSummary(item)}</div>
                       </HoverCardContent>
                     </HoverCard>
                   );
                 })
               )}
+
+              {deletedItems.length > 0 ? (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <div className="mb-2 text-xs font-medium text-amber-900">{t("export.recycleList")}</div>
+                  <div className="space-y-2">
+                    {deletedItems.slice(0, 5).map((item) => (
+                      <div key={`deleted-${item.id}`} className="flex items-center justify-between gap-2 rounded border border-amber-200 bg-white px-2 py-1">
+                        <span className="truncate text-xs font-mono">{item.id}</span>
+                        <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => void handleRestore(item.id)}>
+                          <RotateCcw className="size-3" />
+                          {t("export.restore")}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -395,56 +411,37 @@ export default function ExportReport() {
                     <StatCard label={t("summary.distance")} value={Number(selectedItem.distance_km ?? 0).toFixed(1)} unit="km" />
                     <StatCard label={t("summary.caution")} value={cautionPct.toFixed(1)} unit="%" variant="warning" />
                     <StatCard label={t("workspace.corridorBias")} value={Number(selectedItem.corridor_bias ?? 0).toFixed(2)} />
-                    <StatCard label="模型" value={String(selectedItem.model_version ?? "unet_v1")} />
+                    <StatCard label={t("export.model")} value={String(selectedItem.model_version ?? "unet_v1")} />
                   </div>
 
                   <div className="rounded-lg border bg-white p-3 space-y-3">
                     <div className="flex items-center justify-between">
-                      <div className="text-sm text-muted-foreground">风险摘要与可解释导出</div>
-                      <div className="text-xs text-muted-foreground">{loadingRiskReport ? "加载中..." : riskReport ? "已生成" : "不可用"}</div>
+                      <div className="text-sm text-muted-foreground">{t("export.riskSummary")}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {loadingRiskReport ? t("export.status.loading") : riskReport ? t("export.status.ready") : t("export.status.unavailable")}
+                      </div>
                     </div>
                     {riskReport ? (
                       <>
                         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                          <StatCard label="风险暴露" value={Number((riskReport.risk?.risk_exposure as number) ?? 0).toFixed(3)} />
+                          <StatCard label={t("export.riskExposure")} value={Number((riskReport.risk?.risk_exposure as number) ?? 0).toFixed(3)} />
                           <StatCard
-                            label="高风险穿越比"
+                            label={t("export.highRiskCrossing")}
                             value={(Number((riskReport.risk?.high_risk_crossing_ratio as number) ?? 0) * 100).toFixed(1)}
                             unit="%"
                             variant="warning"
                           />
-                          <StatCard
-                            label="规避收益"
-                            value={Number(((riskReport.risk?.avoidance_gain as any)?.risk_reduction ?? 0)).toFixed(3)}
-                            variant="success"
-                          />
-                          <StatCard
-                            label="距离代价"
-                            value={Number(((riskReport.risk?.avoidance_gain as any)?.distance_tradeoff_km ?? 0)).toFixed(2)}
-                            unit="km"
-                          />
+                          <StatCard label={t("export.avoidanceGain")} value={Number(((riskReport.risk?.avoidance_gain as any)?.risk_reduction ?? 0)).toFixed(3)} variant="success" />
+                          <StatCard label={t("export.distanceTradeoff")} value={Number(((riskReport.risk?.avoidance_gain as any)?.distance_tradeoff_km ?? 0)).toFixed(2)} unit="km" />
                         </div>
                         <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
-                          策略参数：planner={String((riskReport.strategy?.planner as string) ?? "-")} | risk_mode={String((riskReport.risk?.risk_mode as string) ?? "-")} | caution_mode={String((riskReport.strategy?.caution_mode as string) ?? "-")} | corridor_bias={Number((riskReport.strategy?.corridor_bias as number) ?? 0).toFixed(2)}
+                          planner={String((riskReport.strategy?.planner as string) ?? "-")} | risk_mode={String((riskReport.risk?.risk_mode as string) ?? "-")} | caution_mode=
+                          {String((riskReport.strategy?.caution_mode as string) ?? "-")} | corridor_bias=
+                          {Number((riskReport.strategy?.corridor_bias as number) ?? 0).toFixed(2)}
                         </div>
-                        {Array.isArray(riskReport.candidate_comparison?.items) && riskReport.candidate_comparison.items.length > 0 ? (
-                          <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs">
-                            <div className="mb-1 text-slate-700">同场景多策略对比（候选）</div>
-                            <div className="space-y-1">
-                              {riskReport.candidate_comparison.items.slice(0, 6).map((c, idx) => (
-                                <div key={`${String(c.id ?? idx)}-${idx}`} className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 py-1">
-                                  <span className="font-medium">{String(c.label ?? c.id ?? `candidate-${idx + 1}`)}</span>
-                                  <span>d={Number(c.distance_km ?? 0).toFixed(2)}km</span>
-                                  <span>risk={Number(c.risk_exposure ?? 0).toFixed(3)}</span>
-                                  <span>rank={String(c.pareto_rank ?? "-")}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
                       </>
                     ) : (
-                      <div className="text-xs text-muted-foreground">该记录暂无风险报告（可能为旧记录）。</div>
+                      <div className="text-xs text-muted-foreground">{t("export.noRiskReport")}</div>
                     )}
                   </div>
 
@@ -454,18 +451,16 @@ export default function ExportReport() {
                       <div>{t("compliance.researchOnly")}</div>
                       <div className="rounded border border-amber-200 bg-white p-2 text-slate-700 space-y-1">
                         <div>
-                          {t("compliance.freshness")}：{t(`compliance.status.${freshnessStatusKey}`)}
-                          {typeof complianceNotices.data_freshness?.age_hours === "number"
-                            ? ` (${complianceNotices.data_freshness.age_hours.toFixed(1)}h)`
-                            : ""}
+                          {t("compliance.freshness")}: {t(`compliance.status.${freshnessStatusKey}`)}
+                          {typeof complianceNotices.data_freshness?.age_hours === "number" ? ` (${complianceNotices.data_freshness.age_hours.toFixed(1)}h)` : ""}
                         </div>
                         {freshnessHint ? <div>{freshnessHint}</div> : null}
                         <div>
-                          {t("compliance.sourceHealth")}：{sourceHealthHint || "-"}
+                          {t("compliance.sourceHealth")}: {sourceHealthHint || "-"}
                         </div>
                         {complianceNotices.source_credibility?.updated_at ? (
                           <div className="text-[11px] text-slate-500">
-                            {t("compliance.updatedAt")}：{String(complianceNotices.source_credibility.updated_at)}
+                            {t("compliance.updatedAt")}: {String(complianceNotices.source_credibility.updated_at)}
                           </div>
                         ) : null}
                       </div>
@@ -481,10 +476,10 @@ export default function ExportReport() {
 
                   {backtest ? (
                     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                      <StatCard label="Top10 命中率" value={(backtest.top10pct_hit_rate * 100).toFixed(1)} unit="%" />
-                      <StatCard label="Top25 命中率" value={(backtest.top25pct_hit_rate * 100).toFixed(1)} unit="%" />
-                      <StatCard label="对齐度 (0-1)" value={backtest.alignment_norm_0_1.toFixed(3)} />
-                      <StatCard label="Z 分数" value={backtest.alignment_zscore.toFixed(2)} />
+                      <StatCard label="Top10 hit rate" value={(backtest.top10pct_hit_rate * 100).toFixed(1)} unit="%" />
+                      <StatCard label="Top25 hit rate" value={(backtest.top25pct_hit_rate * 100).toFixed(1)} unit="%" />
+                      <StatCard label="Alignment (0-1)" value={backtest.alignment_norm_0_1.toFixed(3)} />
+                      <StatCard label="Z-score" value={backtest.alignment_zscore.toFixed(2)} />
                     </div>
                   ) : null}
 
@@ -504,20 +499,11 @@ export default function ExportReport() {
                   </div>
 
                   <div className="rounded-lg border bg-white p-3 text-sm space-y-2">
-                    <div className="text-muted-foreground">输入与结果</div>
-                    <div className="font-mono text-xs">输入：{getActionSummary(selectedItem)}</div>
+                    <div className="text-muted-foreground">{t("export.inputAndResult")}</div>
+                    <div className="font-mono text-xs">{t("export.input")}: {getActionSummary(selectedItem)}</div>
                     <div className="text-xs text-muted-foreground">
-                      结果：{getResultSummary(selectedItem)} | 点数{" "}
-                      {Number(selectedItem.result?.raw_points ?? selectedItem.explain?.raw_points ?? 0)} {"->"}{" "}
+                      {t("export.result")}: {getResultSummary(selectedItem)} | points {Number(selectedItem.result?.raw_points ?? selectedItem.explain?.raw_points ?? 0)} {"->"}{" "}
                       {Number(selectedItem.result?.smoothed_points ?? selectedItem.explain?.smoothed_points ?? 0)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      策略：{String(selectedItem.action?.policy?.caution_mode ?? "tie_breaker")} | 禁行来源：{" "}
-                      {Array.isArray(selectedItem.action?.policy?.blocked_sources)
-                        ? selectedItem.action?.policy?.blocked_sources?.join(", ")
-                        : "无"}{" "}
-                      | 平滑：{selectedItem.action?.policy?.smoothing ? "是" : "否"} | 偏好：{" "}
-                      {Number(selectedItem.action?.policy?.corridor_bias ?? selectedItem.corridor_bias ?? 0).toFixed(2)}
                     </div>
                   </div>
 
@@ -541,19 +527,19 @@ export default function ExportReport() {
                     </Button>
                     <Button onClick={() => void handleDownloadTemplate("json")} variant="outline" className="w-full gap-2 sm:w-auto">
                       <Download className="size-4" />
-                      下载标准报告(JSON)
+                      {t("export.downloadTemplate.json")}
                     </Button>
                     <Button onClick={() => void handleDownloadTemplate("csv")} variant="outline" className="w-full gap-2 sm:w-auto">
                       <Download className="size-4" />
-                      下载标准报告(CSV)
+                      {t("export.downloadTemplate.csv")}
                     </Button>
                     <Button onClick={() => void handleDownloadTemplate("markdown")} variant="outline" className="w-full gap-2 sm:w-auto">
                       <Download className="size-4" />
-                      下载标准报告(MD)
+                      {t("export.downloadTemplate.md")}
                     </Button>
                     <Button onClick={handleDownloadRiskReport} variant="outline" className="w-full gap-2 sm:w-auto" disabled={!riskReport}>
                       <Download className="size-4" />
-                      下载风险报告
+                      {t("export.downloadRiskReport")}
                     </Button>
                     <Button
                       onClick={handleDownloadCandidateComparison}
@@ -562,7 +548,7 @@ export default function ExportReport() {
                       disabled={!riskReport || !(riskReport.candidate_comparison?.count > 0)}
                     >
                       <Download className="size-4" />
-                      下载候选对比
+                      {t("export.downloadCandidateCompare")}
                     </Button>
                     <Button onClick={handleDownloadImage} variant="outline" className="w-full gap-2 sm:w-auto">
                       <Image className="size-4" />

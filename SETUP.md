@@ -4,7 +4,7 @@
 
 ```powershell
 cd backend
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -53,3 +53,12 @@ setx VITE_API_BASE_URL "http://127.0.0.1:8000/v1"
   - `data/ais_heatmap` (can be generated with the script above)
   - `data/unet_pred`
 - Backend now scans `data/processed/samples/**/meta.json` timestamps directly and can run before full migration.
+
+## 4) Optional extras
+
+For live Copernicus pulls or ML/training flows:
+
+```powershell
+cd backend
+python -m pip install -r requirements-optional.txt
+```

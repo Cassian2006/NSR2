@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
 from app.core.compliance import build_compliance_notices
@@ -22,6 +22,11 @@ class GalleryImageUploadRequest(BaseModel):
 @router.get("/gallery/list")
 def list_gallery() -> dict:
     return {"items": GalleryService().list_items()}
+
+
+@router.get("/gallery/deleted")
+def list_deleted_gallery() -> dict:
+    return {"items": GalleryService().list_deleted_items()}
 
 
 @router.get("/gallery/{gallery_id}")
@@ -107,8 +112,16 @@ def upload_gallery_image(gallery_id: str, payload: GalleryImageUploadRequest) ->
 
 
 @router.delete("/gallery/{gallery_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_gallery(gallery_id: str) -> Response:
-    deleted = GalleryService().delete(gallery_id)
+def delete_gallery(gallery_id: str, soft_delete: bool = Query(default=True)) -> Response:
+    deleted = GalleryService().delete(gallery_id, soft_delete=soft_delete)
     if not deleted:
         raise HTTPException(status_code=404, detail="Gallery item not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/gallery/{gallery_id}/restore")
+def restore_gallery(gallery_id: str) -> dict:
+    restored = GalleryService().restore(gallery_id)
+    if not restored:
+        raise HTTPException(status_code=404, detail="Deleted gallery item not found")
+    return {"ok": True, "gallery_id": gallery_id}
