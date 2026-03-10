@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
+
+import numpy as np
 
 from fastapi import APIRouter, HTTPException
 
 from app.core.config import get_settings
 from app.core.gallery import GalleryService
 from app.core.dataset import normalize_timestamp
+from app.core.geo import load_grid_geo
 from app.core.dynamic_state import build_dynamic_state_sequence, save_dynamic_state_sequence
 from app.core.run_snapshot import save_run_snapshot
 from app.core.schemas import DynamicRoutePlanRequest, RoutePlanRequest
@@ -17,6 +21,10 @@ from app.planning.router import PlanningError, plan_grid_route, plan_grid_route_
 
 router = APIRouter(tags=["plan"])
 
+_ROUTE_OVERLAP_THRESHOLD = 0.82
+_DIVERSITY_PENALTY_RADIUS = 3
+_DIVERSITY_PENALTY_SCALE = 0.3
+
 
 def _run_single_route_plan(
     *,
@@ -25,6 +33,7 @@ def _run_single_route_plan(
     start: tuple[float, float],
     goal: tuple[float, float],
     policy: dict,
+    diversity_penalty: np.ndarray | None = None,
 ):
     return plan_grid_route(
         settings=settings,
@@ -44,7 +53,92 @@ def _run_single_route_plan(
         confidence_level=float(policy["confidence_level"]),
         uncertainty_uplift=bool(policy["uncertainty_uplift"]),
         uncertainty_uplift_scale=float(policy["uncertainty_uplift_scale"]),
+        diversity_penalty=diversity_penalty,
     )
+
+
+def _load_geo_shape(*, settings, timestamp: str) -> tuple[object, tuple[int, int]]:
+    blocked_path = Path(settings.annotation_pack_root) / timestamp / "blocked_mask.npy"
+    if not blocked_path.exists():
+        raise PlanningError(f"blocked_mask missing for timestamp={timestamp}: {blocked_path}")
+    blocked = np.load(blocked_path)
+    shape = (int(blocked.shape[0]), int(blocked.shape[1]))
+    return load_grid_geo(settings, timestamp=timestamp, shape=shape), shape
+
+
+def _segment_cells(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
+    r0, c0 = start
+    r1, c1 = end
+    dr = abs(r1 - r0)
+    dc = abs(c1 - c0)
+    rr = 1 if r0 < r1 else -1
+    cc = 1 if c0 < c1 else -1
+    err = dr - dc
+    out: list[tuple[int, int]] = []
+    while True:
+        out.append((r0, c0))
+        if r0 == r1 and c0 == c1:
+            break
+        e2 = 2 * err
+        if e2 > -dc:
+            err -= dc
+            r0 += rr
+        if e2 < dr:
+            err += dr
+            c0 += cc
+    return out
+
+
+def _route_cells(route_geojson: dict, *, geo, shape: tuple[int, int]) -> set[tuple[int, int]]:
+    coords = route_geojson.get("geometry", {}).get("coordinates", [])
+    if not isinstance(coords, list) or len(coords) < 2:
+        return set()
+    h, w = shape
+    route_cells: set[tuple[int, int]] = set()
+    prev_rc: tuple[int, int] | None = None
+    for point in coords:
+        if not isinstance(point, list | tuple) or len(point) < 2:
+            continue
+        lon = float(point[0])
+        lat = float(point[1])
+        rr, cc, _ = geo.latlon_to_rc(lat, lon)
+        rr = min(max(int(rr), 0), h - 1)
+        cc = min(max(int(cc), 0), w - 1)
+        rc = (rr, cc)
+        if prev_rc is None:
+            route_cells.add(rc)
+        else:
+            route_cells.update(_segment_cells(prev_rc, rc))
+        prev_rc = rc
+    return route_cells
+
+
+def _route_overlap_ratio(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> float:
+    if not a or not b:
+        return 0.0
+    return float(len(a & b) / max(1, min(len(a), len(b))))
+
+
+def _build_diversity_penalty(shape: tuple[int, int], selected_routes: list[set[tuple[int, int]]]) -> np.ndarray | None:
+    if not selected_routes:
+        return None
+    h, w = shape
+    penalty = np.zeros((h, w), dtype=np.float32)
+    radius = _DIVERSITY_PENALTY_RADIUS
+    for route_cells in selected_routes:
+        for rr, cc in route_cells:
+            for dr in range(-radius, radius + 1):
+                for dc in range(-radius, radius + 1):
+                    nr = rr + dr
+                    nc = cc + dc
+                    if nr < 0 or nr >= h or nc < 0 or nc >= w:
+                        continue
+                    dist = max(abs(dr), abs(dc))
+                    if dist > radius:
+                        continue
+                    weight = _DIVERSITY_PENALTY_SCALE * float(radius + 1 - dist) / float(radius + 1)
+                    penalty[nr, nc] += weight
+    return np.clip(penalty, 0.0, 1.2)
 
 
 def _candidate_record(
@@ -181,13 +275,20 @@ def _build_route_candidates(
 ) -> tuple[list[dict], dict]:
     presets = [
         ("requested", "Requested", {}),
-        ("distance_first", "Distance First", {"risk_mode": "aggressive", "caution_mode": "tie_breaker"}),
-        ("risk_first", "Risk First", {"risk_mode": "conservative", "caution_mode": "minimize"}),
-        ("balanced", "Balanced", {"risk_mode": "balanced", "caution_mode": "tie_breaker"}),
+        ("distance_first", "Distance First", {"risk_mode": "aggressive", "caution_mode": "tie_breaker", "corridor_bias": 0.12}),
+        ("risk_first", "Risk First", {"risk_mode": "conservative", "caution_mode": "minimize", "corridor_bias": 0.32}),
+        ("balanced", "Balanced", {"risk_mode": "balanced", "caution_mode": "tie_breaker", "corridor_bias": 0.22}),
+        ("any_angle", "Any Angle", {"planner": "any_angle", "risk_mode": "balanced", "caution_mode": "tie_breaker", "smoothing": False}),
+        ("hybrid_safe", "Hybrid Safe", {"planner": "hybrid_astar", "risk_mode": "conservative", "caution_mode": "budget", "corridor_bias": 0.28}),
     ]
 
+    geo, shape = _load_geo_shape(settings=settings, timestamp=timestamp)
     seen: set[tuple] = set()
     candidates: list[dict] = []
+    accepted_route_cells: list[set[tuple[int, int]]] = []
+    requested_route_cells: set[tuple[int, int]] = set()
+    pruned_overlap_count = 0
+    attempted_count = 0
     for strategy, label, overrides in presets:
         if len(candidates) >= max(1, candidate_limit):
             break
@@ -203,25 +304,46 @@ def _build_route_candidates(
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
+        attempted_count += 1
         try:
             if strategy == "requested":
                 cand_result = base_result
             else:
+                diversity_penalty = _build_diversity_penalty(shape, accepted_route_cells)
                 cand_result = _run_single_route_plan(
                     settings=settings,
                     timestamp=timestamp,
                     start=start,
                     goal=goal,
                     policy=policy,
+                    diversity_penalty=diversity_penalty,
                 )
-            candidates.append(
-                _candidate_record(
-                    strategy=strategy,
-                    label=label,
-                    result=cand_result,
-                    policy=policy,
-                )
+            candidate = _candidate_record(
+                strategy=strategy,
+                label=label,
+                result=cand_result,
+                policy=policy,
             )
+            route_cells = _route_cells(candidate["route_geojson"], geo=geo, shape=shape)
+            if strategy == "requested":
+                requested_route_cells = set(route_cells)
+                candidate["route_overlap_to_requested"] = 1.0
+                candidate["route_overlap_to_selected"] = 0.0
+                candidate["route_distinct"] = True
+                candidates.append(candidate)
+                accepted_route_cells.append(route_cells)
+                continue
+
+            overlap_to_requested = _route_overlap_ratio(route_cells, requested_route_cells)
+            overlap_to_selected = max((_route_overlap_ratio(route_cells, cells) for cells in accepted_route_cells), default=0.0)
+            candidate["route_overlap_to_requested"] = round(float(overlap_to_requested), 6)
+            candidate["route_overlap_to_selected"] = round(float(overlap_to_selected), 6)
+            candidate["route_distinct"] = bool(overlap_to_selected < _ROUTE_OVERLAP_THRESHOLD)
+            if overlap_to_selected >= _ROUTE_OVERLAP_THRESHOLD:
+                pruned_overlap_count += 1
+                continue
+            candidates.append(candidate)
+            accepted_route_cells.append(route_cells)
         except PlanningError as exc:
             candidates.append(
                 {
@@ -240,10 +362,17 @@ def _build_route_candidates(
                         "corridor_bias": float(policy.get("corridor_bias", 0.2)),
                         "vessel_profile_id": policy.get("vessel_profile_id"),
                     },
+                    "route_overlap_to_requested": None,
+                    "route_overlap_to_selected": None,
+                    "route_distinct": False,
                 }
             )
 
     pareto_summary = _pareto_rank_candidates(candidates)
+    pareto_summary["attempted_count"] = int(attempted_count)
+    pareto_summary["distinct_count"] = int(sum(1 for c in candidates if c.get("status") == "ok" and c.get("route_distinct")))
+    pareto_summary["pruned_overlap_count"] = int(pruned_overlap_count)
+    pareto_summary["overlap_threshold"] = float(_ROUTE_OVERLAP_THRESHOLD)
     return candidates, pareto_summary
 
 

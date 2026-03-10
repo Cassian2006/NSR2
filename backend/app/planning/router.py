@@ -2844,6 +2844,7 @@ def plan_grid_route(
     risk_constraint_mode: str = "none",
     risk_budget: float = 1.0,
     confidence_level: float = 0.90,
+    diversity_penalty: np.ndarray | None = None,
 ) -> PlanResult:
     valid_caution_modes = {"tie_breaker", "budget", "minimize", "strict"}
     if caution_mode not in valid_caution_modes:
@@ -2906,6 +2907,12 @@ def plan_grid_route(
         risk_mode=risk_mode,
         risk_weight_scale=risk_weight_scale,
     )
+    if diversity_penalty is not None:
+        if diversity_penalty.shape != (h, w):
+            raise PlanningError(
+                f"Diversity penalty shape mismatch for timestamp={timestamp}: {diversity_penalty.shape} vs {(h, w)}"
+            )
+        risk_penalty = risk_penalty + np.clip(diversity_penalty.astype(np.float32), 0.0, None)
 
     bounds = GridBounds(
         lat_min=float(geo.bounds.lat_min),
@@ -3111,6 +3118,9 @@ def plan_grid_route(
         "risk_penalty_mean": round(float(np.mean(risk_penalty_vals) if risk_penalty_vals else 0.0), 4),
         "risk_penalty_p90": round(float(np.percentile(risk_penalty_vals, 90)) if risk_penalty_vals else 0.0, 4),
         "risk_meta": risk_meta,
+        "diversity_penalty_applied": bool(diversity_penalty is not None),
+        "diversity_penalty_mean": round(float(np.mean(diversity_penalty) if diversity_penalty is not None else 0.0), 4),
+        "diversity_penalty_max": round(float(np.max(diversity_penalty) if diversity_penalty is not None else 0.0), 4),
         "uncertainty_uplift_enabled": bool(uncertainty_uplift),
         "uncertainty_uplift_scale": round(float(unc_meta.get("uplift_scale", 0.0)), 4),
         "uncertainty_threshold": round(float(unc_meta.get("threshold", 0.0)), 4),

@@ -188,6 +188,9 @@ export type RouteCandidate = {
   planner?: string;
   risk_mode?: string;
   caution_mode?: string;
+  route_overlap_to_requested?: number | null;
+  route_overlap_to_selected?: number | null;
+  route_distinct?: boolean;
   error?: string;
   route_geojson?: {
     type: "Feature";
@@ -212,6 +215,17 @@ export type RoutePlanResponse = {
     [key: string]: unknown;
   };
   candidates?: RouteCandidate[];
+  pareto_summary?: {
+    candidate_count?: number;
+    ok_count?: number;
+    failed_count?: number;
+    frontier_count?: number;
+    attempted_count?: number;
+    distinct_count?: number;
+    pruned_overlap_count?: number;
+    overlap_threshold?: number;
+    [key: string]: unknown;
+  };
   gallery_id: string;
   progress_id?: string;
   resolved?: {

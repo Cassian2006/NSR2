@@ -1631,11 +1631,17 @@ export default function MapWorkspace() {
                                 <span>{c.status === "ok" ? `Pareto#${c.pareto_rank ?? "-"}` : "failed"}</span>
                               </div>
                               {c.status === "ok" ? (
-                                <div className="mt-1 grid grid-cols-2 gap-1 text-slate-700">
-                                  <div>d={Number(c.distance_km ?? 0).toFixed(2)} km</div>
-                                  <div>risk={Number(c.risk_exposure ?? 0).toFixed(3)}</div>
-                                  <div>caution={Number(c.caution_len_km ?? 0).toFixed(2)} km</div>
-                                  <div>corridor={Number(c.corridor_score ?? 0).toFixed(3)}</div>
+                                <div className="mt-1 space-y-1 text-slate-700">
+                                  <div className="grid grid-cols-2 gap-1">
+                                    <div>d={Number(c.distance_km ?? 0).toFixed(2)} km</div>
+                                    <div>risk={Number(c.risk_exposure ?? 0).toFixed(3)}</div>
+                                    <div>caution={Number(c.caution_len_km ?? 0).toFixed(2)} km</div>
+                                    <div>corridor={Number(c.corridor_score ?? 0).toFixed(3)}</div>
+                                  </div>
+                                  <div className="text-[11px] text-slate-500">
+                                    overlap={Number(c.route_overlap_to_selected ?? 0).toFixed(2)} / distinct=
+                                    {c.route_distinct ? "yes" : "no"}
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="mt-1 text-red-600">{c.error ?? "candidate failed"}</div>
@@ -1648,6 +1654,8 @@ export default function MapWorkspace() {
                         <div className="text-xs text-slate-600">
                           前沿解数量：{Number((routeMetrics.pareto_summary as any)?.frontier_count ?? 0)} / 候选总数：
                           {Number((routeMetrics.pareto_summary as any)?.candidate_count ?? routeCandidates.length)}
+                          {" / "}
+                          去重过滤：{Number((routeMetrics.pareto_summary as any)?.pruned_overlap_count ?? 0)}
                         </div>
                       ) : null}
                     </div>
