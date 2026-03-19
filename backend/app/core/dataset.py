@@ -8,7 +8,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from app.core.config import get_settings
+from app.core.geo import get_grid_geo_diagnostics, load_grid_geo
 
 
 TIMESTAMP_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}$")
@@ -255,6 +258,16 @@ class DatasetService:
                 "unit": "score",
             },
         ]
+
+    def grid_geo(self, timestamp: str) -> dict[str, Any] | None:
+        normalized = normalize_timestamp(timestamp)
+        blocked_path = self.settings.annotation_pack_root / normalized / "blocked_mask.npy"
+        if not blocked_path.exists():
+            return None
+        blocked = np.load(blocked_path)
+        if blocked.ndim != 2:
+            return None
+        return get_grid_geo_diagnostics(self.settings, timestamp=normalized, shape=blocked.shape)
 
     def datasets_summary(self) -> dict[str, Any]:
         months = self.list_months()

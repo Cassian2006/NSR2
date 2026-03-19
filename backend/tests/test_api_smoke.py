@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 import pytest
@@ -311,6 +312,74 @@ def test_latest_progress_endpoint(client: TestClient) -> None:
     assert payload["exists"] is False
     assert payload["status"] == "not_found"
     assert payload["progress_id"] == progress_id
+
+
+def test_route_progress_endpoint_and_plan_response_progress_id(client: TestClient) -> None:
+    progress_id = f"route-progress-smoke-{uuid4().hex}"
+    missing = client.get("/v1/route/progress", params={"progress_id": progress_id})
+    assert missing.status_code == 200
+    payload = missing.json()
+    assert payload["exists"] is False
+    assert payload["status"] == "not_found"
+    assert payload["progress_id"] == progress_id
+
+    plan_payload = {
+        "timestamp": "2024-07-01-00:00",
+        "progress_id": progress_id,
+        "start": {"lat": 70.5, "lon": 30.0},
+        "goal": {"lat": 72.0, "lon": 150.0},
+        "policy": {
+            "objective": "shortest_distance_under_safety",
+            "blocked_sources": ["bathy", "unet_blocked"],
+            "caution_mode": "tie_breaker",
+            "corridor_bias": 0.2,
+            "smoothing": True,
+            "planner": "dstar_lite",
+            "risk_mode": "balanced",
+            "risk_weight_scale": 1.0,
+            "risk_constraint_mode": "none",
+            "risk_budget": 1.0,
+            "confidence_level": 0.9,
+            "return_candidates": False,
+            "candidate_limit": 1,
+        },
+    }
+    plan_resp = client.post("/v1/route/plan", json=plan_payload)
+    assert plan_resp.status_code == 200
+    plan = plan_resp.json()
+    assert plan["progress_id"] == progress_id
+
+    done = client.get("/v1/route/progress", params={"progress_id": progress_id})
+    assert done.status_code == 200
+    done_payload = done.json()
+    assert done_payload["exists"] is True
+    assert done_payload["status"] == "completed"
+    assert done_payload["percent"] == 100
+
+
+def test_layers_endpoint_includes_grid_bounds(client: TestClient) -> None:
+    resp = client.get("/v1/layers", params={"timestamp": "2024-07-01-00:00"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    bounds = payload["bounds"]
+    geo = payload["geo"]
+    assert bounds["lat_min"] < bounds["lat_max"]
+    assert bounds["lon_min"] < bounds["lon_max"]
+    assert bounds["lat_min"] == 60.0
+    assert bounds["lat_max"] == 80.0
+    assert geo["valid"] is True
+    assert isinstance(geo["source"], str)
+    assert isinstance(geo["warnings"], list)
+
+
+def test_tiles_and_overlay_disable_cache(client: TestClient) -> None:
+    overlay = client.get("/v1/overlay/bathy.png", params={"timestamp": "2024-07-01-00:00", "size": "320,180"})
+    assert overlay.status_code == 200
+    assert "no-store" in str(overlay.headers.get("cache-control", "")).lower()
+
+    tile = client.get("/v1/tiles/bathy/3/3/2.png", params={"timestamp": "2024-07-01-00:00"})
+    assert tile.status_code == 200
+    assert "no-store" in str(tile.headers.get("cache-control", "")).lower()
 
 
 def test_latest_runtime_endpoint(client: TestClient) -> None:

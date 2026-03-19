@@ -12,6 +12,7 @@ import {
   getLayers,
   getVesselProfiles,
   getLatestProgress,
+  getRouteProgress,
   getLatestStatus,
   getTimestamps,
   getCopernicusConfig,
@@ -24,6 +25,8 @@ import {
   type InferResponse,
   type RouteCandidate,
   type RoutePlanResponse,
+  type GridBounds,
+  type GridGeoDiagnostics,
   type VesselProfile,
 } from "../api/client";
 import CoordinateInput from "../components/CoordinateInput";
@@ -109,6 +112,8 @@ export default function MapWorkspace() {
 
   const [layers, setLayers] = useState<LayerStates>(DEFAULT_LAYERS);
   const [availability, setAvailability] = useState(AVAILABILITY_DEFAULT);
+  const [gridBounds, setGridBounds] = useState<GridBounds | null>(null);
+  const [gridGeoInfo, setGridGeoInfo] = useState<GridGeoDiagnostics | null>(null);
 
   const [safetyPolicy, setSafetyPolicy] = useState("blocked-bathy-unet");
   const [cautionHandling, setCautionHandling] = useState("tiebreaker");
@@ -165,6 +170,16 @@ export default function MapWorkspace() {
   const [copernicusConfigured, setCopernicusConfigured] = useState(false);
   const [latestMeta, setLatestMeta] = useState<Record<string, unknown> | null>(null);
   const [complianceNotices, setComplianceNotices] = useState<ComplianceNoticesPayload | null>(null);
+  const [routeProgress, setRouteProgress] = useState({
+    progressId: "",
+    status: "idle",
+    phase: "idle",
+    message: "",
+    percent: 0,
+    error: "",
+    visible: false,
+  });
+  const routeProgressTimerRef = useRef<number | null>(null);
   const [latestProgress, setLatestProgress] = useState({
     progressId: "",
     status: "idle",
@@ -180,6 +195,13 @@ export default function MapWorkspace() {
     if (latestProgressTimerRef.current !== null) {
       window.clearInterval(latestProgressTimerRef.current);
       latestProgressTimerRef.current = null;
+    }
+  }, []);
+
+  const stopRouteProgressPolling = useCallback(() => {
+    if (routeProgressTimerRef.current !== null) {
+      window.clearInterval(routeProgressTimerRef.current);
+      routeProgressTimerRef.current = null;
     }
   }, []);
 
@@ -204,9 +226,10 @@ export default function MapWorkspace() {
 
   useEffect(() => {
     return () => {
+      stopRouteProgressPolling();
       stopLatestProgressPolling();
     };
-  }, [stopLatestProgressPolling]);
+  }, [stopLatestProgressPolling, stopRouteProgressPolling]);
 
   useEffect(() => {
     let active = true;
@@ -286,6 +309,12 @@ export default function MapWorkspace() {
       wind: res.layers.find((l) => l.id === "wind")?.available ?? false,
     };
     setAvailability(nextAvailability);
+    setGridGeoInfo(res.geo ?? null);
+    const nextBounds = res.geo?.valid ? res.geo.bounds : res.bounds ?? null;
+    if (res.geo && !res.geo.valid) {
+      console.warn("invalid grid geo diagnostics", res.geo);
+    }
+    setGridBounds(nextBounds);
     setTileRevision((prev) => prev + 1);
   }, []);
 
@@ -503,6 +532,25 @@ export default function MapWorkspace() {
     return labels[phase] ?? phase;
   }, [latestProgress.phase]);
 
+  const routePhaseText = useMemo(() => {
+    const phase = routeProgress.phase || "unknown";
+    const labels: Record<string, string> = {
+      idle: "空闲",
+      init: "初始化",
+      validate: "校验请求",
+      prepare: "准备网格",
+      risk: "构建风险场",
+      search: "搜索路径",
+      postprocess: "平滑与评估",
+      candidates: "生成候选路线",
+      save: "保存结果",
+      done: "完成",
+      error: "失败",
+      unknown: "未知",
+    };
+    return labels[phase] ?? phase;
+  }, [routeProgress.phase]);
+
   const freshnessStatusKey =
     complianceNotices?.data_freshness?.status && ["fresh", "stale", "outdated", "unknown"].includes(String(complianceNotices.data_freshness.status))
       ? String(complianceNotices.data_freshness.status)
@@ -555,8 +603,43 @@ export default function MapWorkspace() {
       toast.error(t("toast.tsRequired"));
       return;
     }
+    const progressId = `route-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    stopRouteProgressPolling();
+    setRouteProgress({
+      progressId,
+      status: "running",
+      phase: "init",
+      message: "正在初始化规划任务...",
+      percent: 1,
+      error: "",
+      visible: true,
+    });
     setPlanning(true);
     toast.loading(t("toast.planning"), { id: "plan-route" });
+    const pollOnce = async () => {
+      try {
+        const p = await getRouteProgress(progressId);
+        setRouteProgress((prev) => ({
+          ...prev,
+          progressId,
+          status: p.status,
+          phase: p.phase ?? prev.phase,
+          message: p.message ?? prev.message,
+          percent: Number.isFinite(p.percent) ? p.percent : prev.percent,
+          error: typeof p.error === "string" ? p.error : "",
+          visible: true,
+        }));
+        if (p.status === "completed" || p.status === "failed") {
+          stopRouteProgressPolling();
+        }
+      } catch {
+        // no-op
+      }
+    };
+    void pollOnce();
+    routeProgressTimerRef.current = window.setInterval(() => {
+      void pollOnce();
+    }, 900);
     try {
       const cautionMode = safetyPolicy === "strict" ? "strict" : cautionHandling === "tiebreaker" ? "tie_breaker" : cautionHandling;
       const blockedSources =
@@ -567,6 +650,7 @@ export default function MapWorkspace() {
             : ["bathy", "unet_blocked"];
       const response = await planRoute({
         timestamp,
+        progress_id: progressId,
         start: { lat: startLatNum, lon: startLonNum },
         goal: { lat: goalLatNum, lon: goalLonNum },
         policy: {
@@ -586,6 +670,17 @@ export default function MapWorkspace() {
           vessel_profile_id: vesselProfileId,
         },
       });
+      stopRouteProgressPolling();
+      setRouteProgress((prev) => ({
+        ...prev,
+        progressId,
+        status: "completed",
+        phase: "done",
+        message: "路线规划完成",
+        percent: 100,
+        error: "",
+        visible: true,
+      }));
       setRouteResult(response);
       const startAdjusted = Boolean(response.explain?.["start_adjusted"]);
       const goalAdjusted = Boolean(response.explain?.["goal_adjusted"]);
@@ -595,6 +690,16 @@ export default function MapWorkspace() {
       toast.success(`${t("toast.success")}（记录：${response.gallery_id}）`, { id: "plan-route" });
       void captureAndUploadGalleryImage(response.gallery_id);
     } catch (error) {
+      stopRouteProgressPolling();
+      setRouteProgress((prev) => ({
+        ...prev,
+        progressId,
+        status: "failed",
+        phase: "error",
+        message: "路线规划失败",
+        error: getErrorMessage(error),
+        visible: true,
+      }));
       toast.error(`${t("toast.planFailed")}: ${getErrorMessage(error)}`, { id: "plan-route" });
     } finally {
       setPlanning(false);
@@ -626,11 +731,46 @@ export default function MapWorkspace() {
       toast.error("可用后续时间片不足，无法启动时序重规划");
       return;
     }
+    const progressId = `route-dyn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    stopRouteProgressPolling();
+    setRouteProgress({
+      progressId,
+      status: "running",
+      phase: "init",
+      message: "正在初始化时序回放...",
+      percent: 1,
+      error: "",
+      visible: true,
+    });
 
     setDynamicPlanning(true);
     setPlanning(true);
     setReplayPlaying(false);
     toast.loading("正在运行时序数字孪生回放...", { id: "plan-dynamic-route" });
+    const pollOnce = async () => {
+      try {
+        const p = await getRouteProgress(progressId);
+        setRouteProgress((prev) => ({
+          ...prev,
+          progressId,
+          status: p.status,
+          phase: p.phase ?? prev.phase,
+          message: p.message ?? prev.message,
+          percent: Number.isFinite(p.percent) ? p.percent : prev.percent,
+          error: typeof p.error === "string" ? p.error : "",
+          visible: true,
+        }));
+        if (p.status === "completed" || p.status === "failed") {
+          stopRouteProgressPolling();
+        }
+      } catch {
+        // no-op
+      }
+    };
+    void pollOnce();
+    routeProgressTimerRef.current = window.setInterval(() => {
+      void pollOnce();
+    }, 900);
     try {
       const cautionMode = safetyPolicy === "strict" ? "strict" : cautionHandling === "tiebreaker" ? "tie_breaker" : cautionHandling;
       const blockedSources =
@@ -641,6 +781,7 @@ export default function MapWorkspace() {
             : ["bathy", "unet_blocked"];
       const response = await planDynamicRoute({
         timestamps: dynamicTimestamps,
+        progress_id: progressId,
         start: { lat: startLatNum, lon: startLonNum },
         goal: { lat: goalLatNum, lon: goalLonNum },
         advance_steps: Math.max(1, dynamicAdvanceSteps[0]),
@@ -673,6 +814,17 @@ export default function MapWorkspace() {
           vessel_profile_id: vesselProfileId,
         },
       });
+      stopRouteProgressPolling();
+      setRouteProgress((prev) => ({
+        ...prev,
+        progressId,
+        status: "completed",
+        phase: "done",
+        message: "时序重规划完成",
+        percent: 100,
+        error: "",
+        visible: true,
+      }));
       setRouteResult(response);
       const logLen = Array.isArray((response.explain as any)?.dynamic_execution_log)
         ? ((response.explain as any).dynamic_execution_log as unknown[]).length
@@ -681,6 +833,16 @@ export default function MapWorkspace() {
       toast.success(`时序回放完成：${dynamicTimestamps.length} 个时间片`, { id: "plan-dynamic-route" });
       void captureAndUploadGalleryImage(response.gallery_id);
     } catch (error) {
+      stopRouteProgressPolling();
+      setRouteProgress((prev) => ({
+        ...prev,
+        progressId,
+        status: "failed",
+        phase: "error",
+        message: "时序重规划失败",
+        error: getErrorMessage(error),
+        visible: true,
+      }));
       toast.error(`时序回放失败：${getErrorMessage(error)}`, { id: "plan-dynamic-route" });
     } finally {
       setDynamicPlanning(false);
@@ -1331,6 +1493,19 @@ export default function MapWorkspace() {
                     <Navigation className="size-4" />
                     {planning ? t("workspace.planRoute.loading") : t("workspace.planRoute")}
                   </Button>
+                  {(planning || routeProgress.visible) && routeProgress.progressId ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-emerald-900">
+                        <span>{routePhaseText}</span>
+                        <span>{Math.max(0, Math.min(100, Math.round(routeProgress.percent)))}%</span>
+                      </div>
+                      <Progress value={Math.max(0, Math.min(100, routeProgress.percent))} />
+                      <div className="text-[11px] text-emerald-900">{routeProgress.message || "进行中..."}</div>
+                      {routeProgress.error ? (
+                        <div className="text-[11px] text-red-600">{routeProgress.error}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 space-y-3">
                     <div className="text-sm font-medium text-emerald-900">时序数字孪生回放</div>
                     <div className="space-y-1">
@@ -1568,6 +1743,7 @@ export default function MapWorkspace() {
             tileRevision={tileRevision}
             layoutKey={mapLayoutKey}
             layers={layers}
+            gridBounds={gridBounds}
             showRoute={Boolean(activeRouteGeojson)}
             onMapClick={handleMapClick}
             routeGeojson={activeRouteGeojson ?? undefined}
@@ -1575,9 +1751,18 @@ export default function MapWorkspace() {
             goal={mapGoal}
             replayOverlay={replayOverlay ?? undefined}
           />
-          {pickTarget ? (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-xs text-white">
-              {pickTarget === "start" ? t("workspace.pick.start.hint") : t("workspace.pick.goal.hint")}
+          {gridGeoInfo?.fallback || gridGeoInfo?.valid === false ? (
+            <div className="pointer-events-none absolute left-4 top-4 z-[500] max-w-sm rounded-md border border-amber-300 bg-amber-50/95 px-3 py-2 text-[11px] text-amber-900 shadow">
+              <div className="font-medium">图层坐标诊断</div>
+              <div>source={gridGeoInfo?.source ?? "unknown"}</div>
+              <div>detail={gridGeoInfo?.detail ?? "n/a"}</div>
+              {gridGeoInfo?.valid === false ? <div>当前坐标范围异常，前端已回退到默认 AOI。</div> : null}
+              {gridGeoInfo?.fallback ? <div>当前图层使用了 fallback 坐标源，建议检查 env_grids 元数据。</div> : null}
+            </div>
+          ) : null}
+            {pickTarget ? (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-xs text-white">
+                {pickTarget === "start" ? t("workspace.pick.start.hint") : t("workspace.pick.goal.hint")}
             </div>
           ) : null}
 

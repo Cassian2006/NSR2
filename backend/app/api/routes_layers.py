@@ -80,7 +80,13 @@ def get_layers(timestamp: str = Query(...)) -> dict:
         normalized = normalize_timestamp(timestamp)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"timestamp": normalized, "layers": service.list_layers(normalized)}
+    geo = service.grid_geo(normalized)
+    return {
+        "timestamp": normalized,
+        "layers": service.list_layers(normalized),
+        "geo": geo,
+        "bounds": (geo or {}).get("bounds"),
+    }
 
 
 @router.get("/overlay/{layer}.png")
@@ -109,7 +115,11 @@ def get_overlay(layer: str, timestamp: str = Query(...), bbox: str | None = None
         width=width,
         height=height,
     )
-    return Response(content=png, media_type="image/png")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @router.get("/tiles/{layer}/{z}/{x}/{y}.png")
@@ -130,4 +140,8 @@ def get_tile(layer: str, z: int, x: int, y: int, timestamp: str = Query(...)) ->
         y=y,
         tile_size=256,
     )
-    return Response(content=png, media_type="image/png")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )

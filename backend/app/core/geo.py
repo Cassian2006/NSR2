@@ -120,10 +120,74 @@ def _load_axes_from_meta(meta_path: Path, h: int, w: int) -> tuple[np.ndarray, n
     return None
 
 
+def _candidate_env_grids_roots(settings: Settings) -> tuple[str, ...]:
+    roots: list[Path] = [settings.env_grids_root]
+    project_default = settings.project_root / "data" / "interim" / "env_grids"
+    use_project_fallback = (
+        not settings.env_grids_root.exists()
+        and (
+            "demo_data" in settings.annotation_pack_root.parts
+            or "demo_data" in settings.env_grids_root.parts
+        )
+    )
+    if use_project_fallback and project_default not in roots:
+        roots.append(project_default)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for root in roots:
+        resolved = str(root)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        deduped.append(resolved)
+    return tuple(deduped)
+
+
+def _resolve_geo_source(
+    *,
+    annotation_pack_root: str,
+    env_grids_roots: tuple[str, ...],
+    timestamp: str,
+) -> dict[str, str | bool]:
+    root = Path(annotation_pack_root)
+    pack_dir = root / timestamp
+    lat_path = _find_axis_file(pack_dir, ["latitudes.npy", "lats.npy", "lat.npy"])
+    lon_path = _find_axis_file(pack_dir, ["longitudes.npy", "lons.npy", "lon.npy"])
+    if lat_path is not None and lon_path is not None:
+        return {
+            "source": "annotation_axes",
+            "detail": f"{lat_path.name}+{lon_path.name}",
+            "fallback": False,
+        }
+
+    meta_path = pack_dir / "meta.json"
+    if meta_path.exists():
+        return {
+            "source": "annotation_meta",
+            "detail": str(meta_path),
+            "fallback": False,
+        }
+
+    for env_grids_root in env_grids_roots:
+        env_meta_path = Path(env_grids_root) / timestamp / "meta.json"
+        if env_meta_path.exists():
+            return {
+                "source": "env_meta",
+                "detail": str(env_meta_path),
+                "fallback": "demo_data" in str(env_grids_root),
+            }
+
+    return {
+        "source": "configured_default",
+        "detail": "settings.grid_* defaults",
+        "fallback": True,
+    }
+
+
 @lru_cache(maxsize=512)
 def _load_geo_cached(
     annotation_pack_root: str,
-    env_grids_root: str,
+    env_grids_roots: tuple[str, ...],
     timestamp: str,
     h: int,
     w: int,
@@ -152,9 +216,10 @@ def _load_geo_cached(
     if meta_axes is not None:
         return GridGeo(lat_axis=meta_axes[0], lon_axis=meta_axes[1])
 
-    env_meta_axes = _load_axes_from_meta(Path(env_grids_root) / timestamp / "meta.json", h=h, w=w)
-    if env_meta_axes is not None:
-        return GridGeo(lat_axis=env_meta_axes[0], lon_axis=env_meta_axes[1])
+    for env_grids_root in env_grids_roots:
+        env_meta_axes = _load_axes_from_meta(Path(env_grids_root) / timestamp / "meta.json", h=h, w=w)
+        if env_meta_axes is not None:
+            return GridGeo(lat_axis=env_meta_axes[0], lon_axis=env_meta_axes[1])
 
     lat_axis = np.linspace(lat_max, lat_min, h, dtype=np.float64)
     lon_axis = np.linspace(lon_min, lon_max, w, dtype=np.float64)
@@ -165,7 +230,7 @@ def load_grid_geo(settings: Settings, timestamp: str, shape: tuple[int, int]) ->
     h, w = int(shape[0]), int(shape[1])
     return _load_geo_cached(
         annotation_pack_root=str(settings.annotation_pack_root),
-        env_grids_root=str(settings.env_grids_root),
+        env_grids_roots=_candidate_env_grids_roots(settings),
         timestamp=timestamp,
         h=h,
         w=w,
@@ -174,3 +239,40 @@ def load_grid_geo(settings: Settings, timestamp: str, shape: tuple[int, int]) ->
         lon_min=float(settings.grid_lon_min),
         lon_max=float(settings.grid_lon_max),
     )
+
+
+def get_grid_geo_diagnostics(settings: Settings, timestamp: str, shape: tuple[int, int]) -> dict[str, object]:
+    geo = load_grid_geo(settings=settings, timestamp=timestamp, shape=shape)
+    source_meta = _resolve_geo_source(
+        annotation_pack_root=str(settings.annotation_pack_root),
+        env_grids_roots=_candidate_env_grids_roots(settings),
+        timestamp=timestamp,
+    )
+    bounds = {
+        "lat_min": float(geo.bounds.lat_min),
+        "lat_max": float(geo.bounds.lat_max),
+        "lon_min": float(geo.bounds.lon_min),
+        "lon_max": float(geo.bounds.lon_max),
+    }
+    valid = (
+        bounds["lat_min"] < bounds["lat_max"]
+        and bounds["lon_min"] < bounds["lon_max"]
+        and -90.0 <= bounds["lat_min"] <= 90.0
+        and -90.0 <= bounds["lat_max"] <= 90.0
+        and -180.0 <= bounds["lon_min"] <= 180.0
+        and -180.0 <= bounds["lon_max"] <= 180.0
+    )
+    warnings: list[str] = []
+    if not valid:
+        warnings.append("invalid_bounds")
+    if bool(source_meta.get("fallback")):
+        warnings.append("fallback_geo_source")
+    return {
+        "bounds": bounds,
+        "shape": [int(shape[0]), int(shape[1])],
+        "source": str(source_meta["source"]),
+        "detail": str(source_meta["detail"]),
+        "fallback": bool(source_meta["fallback"]),
+        "valid": bool(valid),
+        "warnings": warnings,
+    }

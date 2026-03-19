@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.core.config import get_settings
 from app.core.gallery import GalleryService
 from app.core.dataset import normalize_timestamp
 from app.core.geo import load_grid_geo
 from app.core.dynamic_state import build_dynamic_state_sequence, save_dynamic_state_sequence
+from app.core.latest_progress import complete_progress, fail_progress, get_progress, start_progress, update_progress
 from app.core.run_snapshot import save_run_snapshot
 from app.core.schemas import DynamicRoutePlanRequest, RoutePlanRequest
 from app.core.vessel_profiles import apply_vessel_profile_to_policy
@@ -26,6 +28,13 @@ _DIVERSITY_PENALTY_RADIUS = 3
 _DIVERSITY_PENALTY_SCALE = 0.3
 
 
+def _plan_progress_cb(progress_id: str):
+    def _callback(phase: str, message: str, percent: int) -> None:
+        update_progress(progress_id, phase=phase, message=message, percent=percent)
+
+    return _callback
+
+
 def _run_single_route_plan(
     *,
     settings,
@@ -34,6 +43,7 @@ def _run_single_route_plan(
     goal: tuple[float, float],
     policy: dict,
     diversity_penalty: np.ndarray | None = None,
+    progress_cb=None,
 ):
     return plan_grid_route(
         settings=settings,
@@ -54,6 +64,7 @@ def _run_single_route_plan(
         uncertainty_uplift=bool(policy["uncertainty_uplift"]),
         uncertainty_uplift_scale=float(policy["uncertainty_uplift_scale"]),
         diversity_penalty=diversity_penalty,
+        progress_cb=progress_cb,
     )
 
 
@@ -272,6 +283,7 @@ def _build_route_candidates(
     base_policy: dict,
     base_result,
     candidate_limit: int,
+    progress_id: str | None = None,
 ) -> tuple[list[dict], dict]:
     presets = [
         ("requested", "Requested", {}),
@@ -305,6 +317,13 @@ def _build_route_candidates(
             continue
         seen.add(dedupe_key)
         attempted_count += 1
+        if progress_id:
+            update_progress(
+                progress_id,
+                phase="candidates",
+                message=f"Evaluating candidate {attempted_count}/{len(presets)}: {label}",
+                percent=min(94, 72 + attempted_count * 4),
+            )
         try:
             if strategy == "requested":
                 cand_result = base_result
@@ -317,6 +336,7 @@ def _build_route_candidates(
                     goal=goal,
                     policy=policy,
                     diversity_penalty=diversity_penalty,
+                    progress_cb=None,
                 )
             candidate = _candidate_record(
                 strategy=strategy,
@@ -376,14 +396,22 @@ def _build_route_candidates(
     return candidates, pareto_summary
 
 
+@router.get("/route/progress")
+def route_progress(progress_id: str = Query(..., description="route planning progress id")) -> dict:
+    return get_progress(progress_id)
+
+
 @router.post("/route/plan")
 def plan_route(payload: RoutePlanRequest) -> dict:
     settings = get_settings()
     version_snapshot = build_version_snapshot(settings=settings, model_version="unet_v1")
     run_snapshot_meta = {"snapshot_id": "", "snapshot_file": ""}
+    progress_id = (payload.progress_id or f"route-{uuid4().hex}").strip()
+    start_progress(progress_id, message="Starting route planning")
     try:
         timestamp = normalize_timestamp(payload.timestamp)
     except ValueError as exc:
+        fail_progress(progress_id, error=str(exc), phase="validate")
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     requested_policy = payload.policy.model_dump()
@@ -394,19 +422,23 @@ def plan_route(payload: RoutePlanRequest) -> dict:
     start_rc = (payload.start.lat, payload.start.lon)
     goal_rc = (payload.goal.lat, payload.goal.lon)
     try:
+        update_progress(progress_id, phase="prepare", message="Validating route request", percent=6)
         result = _run_single_route_plan(
             settings=settings,
             timestamp=timestamp,
             start=start_rc,
             goal=goal_rc,
             policy=policy_data,
+            progress_cb=_plan_progress_cb(progress_id),
         )
     except PlanningError as exc:
+        fail_progress(progress_id, error=str(exc), phase="search")
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     candidates: list[dict] = []
     pareto_summary: dict | None = None
     if payload.policy.return_candidates:
+        update_progress(progress_id, phase="candidates", message="Generating Pareto candidates", percent=72)
         candidates, pareto_summary = _build_route_candidates(
             settings=settings,
             timestamp=timestamp,
@@ -415,6 +447,7 @@ def plan_route(payload: RoutePlanRequest) -> dict:
             base_policy=policy_data,
             base_result=result,
             candidate_limit=int(payload.policy.candidate_limit),
+            progress_id=progress_id,
         )
 
     explain = dict(result.explain)
@@ -458,6 +491,7 @@ def plan_route(payload: RoutePlanRequest) -> dict:
         {"event": "route_plan_completed", "status": "ok", "result_status": "success"},
     ]
     try:
+        update_progress(progress_id, phase="save", message="Saving route artifacts", percent=96)
         run_snapshot_meta = save_run_snapshot(
             settings=settings,
             kind="plan",
@@ -518,12 +552,14 @@ def plan_route(payload: RoutePlanRequest) -> dict:
             "timeline": timeline,
         }
     )
+    complete_progress(progress_id, message="Route planning completed")
 
     return {
         "route_geojson": route_geojson,
         "explain": explain,
         "candidates": candidates,
         "gallery_id": gallery_id,
+        "progress_id": progress_id,
         "version_snapshot": version_snapshot,
         "run_snapshot_id": run_snapshot_meta["snapshot_id"],
         "run_snapshot_file": run_snapshot_meta["snapshot_file"],
@@ -536,11 +572,15 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
     version_snapshot = build_version_snapshot(settings=settings, model_version="unet_v1")
     run_snapshot_meta = {"snapshot_id": "", "snapshot_file": ""}
     dynamic_state_meta = {"sequence_id": "", "sequence_file": "", "checkpoint_file": ""}
+    progress_id = (payload.progress_id or f"route-dyn-{uuid4().hex}").strip()
+    start_progress(progress_id, message="Starting dynamic route planning")
     try:
         timestamps = [normalize_timestamp(ts) for ts in payload.timestamps]
     except ValueError as exc:
+        fail_progress(progress_id, error=str(exc), phase="validate")
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if len(timestamps) < 2:
+        fail_progress(progress_id, error="Dynamic route planning requires at least 2 timestamps.", phase="validate")
         raise HTTPException(status_code=422, detail="Dynamic route planning requires at least 2 timestamps.")
 
     requested_policy = payload.policy.model_dump()
@@ -550,6 +590,7 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
     )
 
     try:
+        update_progress(progress_id, phase="prepare", message="Preparing dynamic replanning request", percent=8)
         result = plan_grid_route_dynamic(
             settings=settings,
             timestamps=timestamps,
@@ -581,8 +622,10 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
             dynamic_risk_warn_mode=str(policy_data["dynamic_risk_warn_mode"]),
             dynamic_risk_hard_mode=str(policy_data["dynamic_risk_hard_mode"]),
             dynamic_risk_switch_min_interval=int(policy_data["dynamic_risk_switch_min_interval"]),
+            progress_cb=_plan_progress_cb(progress_id),
         )
     except PlanningError as exc:
+        fail_progress(progress_id, error=str(exc), phase="search")
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     result.explain["vessel_profile"] = vessel_profile
@@ -592,6 +635,7 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
 
     route_coords = result.route_geojson.get("geometry", {}).get("coordinates", [])
     try:
+        update_progress(progress_id, phase="save", message="Saving replay sequence", percent=95)
         dynamic_state = build_dynamic_state_sequence(
             settings=settings,
             timestamps=timestamps,
@@ -698,11 +742,13 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
             "timeline": timeline,
         }
     )
+    complete_progress(progress_id, message="Dynamic route planning completed")
 
     return {
         "route_geojson": result.route_geojson,
         "explain": result.explain,
         "gallery_id": gallery_id,
+        "progress_id": progress_id,
         "version_snapshot": version_snapshot,
         "run_snapshot_id": run_snapshot_meta["snapshot_id"],
         "run_snapshot_file": run_snapshot_meta["snapshot_file"],

@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -25,6 +26,13 @@ EARTH_RADIUS_KM = 6371.0088
 DSTAR_INCREMENTAL_CHANGED_RATIO = 0.08
 DSTAR_INCREMENTAL_CHANGED_MIN_CELLS = 64
 PATH_METRICS_CACHE_MAX = 512
+ProgressCallback = Callable[[str, str, int], None]
+
+
+def _emit_progress(progress_cb: ProgressCallback | None, phase: str, message: str, percent: int) -> None:
+    if progress_cb is None:
+        return
+    progress_cb(phase, message, max(0, min(100, int(percent))))
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -297,6 +305,17 @@ def _smooth_cells_los_constrained(
         out.append(cells[chosen])
         i = chosen
     return out
+
+
+def _smooth_cells_with_marine_turns(
+    cells: list[tuple[int, int]],
+    blocked: np.ndarray,
+    *,
+    max_turn_deg: float,
+) -> list[tuple[int, int]]:
+    if len(cells) <= 2:
+        return cells
+    return _smooth_cells_los_constrained(cells, blocked, max_turn_deg=max_turn_deg)
 
 
 def _cells_to_coords(geo, cells: list[tuple[int, int]]) -> list[list[float]]:
@@ -834,22 +853,24 @@ def _segment_cell_stats(
     traced = _trace_line_cells(from_rc, to_rc, (h, w))
     sampled = traced[1:] if len(traced) > 1 else traced
     if not sampled:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0
 
     caution_hits = 0
     near_hits = 0
     corridor_vals: list[float] = []
     uncertainty_vals: list[float] = []
     risk_vals: list[float] = []
-    for rr, rc in sampled:
-        caution_hits += int(bool(caution[rr, rc]))
+    for cell in sampled:
+        rr = int(cell[0])
+        cc = int(cell[1])
+        caution_hits += int(bool(caution[rr, cc]))
         if near_blocked is not None:
-            near_hits += int(bool(near_blocked[rr, rc]))
-        corridor_vals.append(float(ais_norm[rr, rc]))
+            near_hits += int(bool(near_blocked[rr, cc]))
+        corridor_vals.append(float(ais_norm[rr, cc]))
         if uncertainty_penalty is not None:
-            uncertainty_vals.append(float(uncertainty_penalty[rr, rc]))
+            uncertainty_vals.append(float(uncertainty_penalty[rr, cc]))
         if risk_penalty is not None:
-            risk_vals.append(float(risk_penalty[rr, rc]))
+            risk_vals.append(float(risk_penalty[rr, cc]))
 
     n = len(sampled)
     caution_ratio = float(caution_hits / max(1, n))
@@ -892,6 +913,20 @@ def _transition_cost_segment(
     mult -= corridor_reward * corridor_mean
     mult = max(0.15, mult)
     return step_km * mult
+
+
+def _turn_penalty_km(
+    prev_rc: tuple[int, int] | None,
+    cur_rc: tuple[int, int],
+    next_rc: tuple[int, int],
+    *,
+    step_km: float,
+    weight: float,
+) -> float:
+    if prev_rc is None or weight <= 1e-8:
+        return 0.0
+    turn_deg = _turn_angle_deg(prev_rc, cur_rc, next_rc)
+    return float(step_km * float(weight) * (turn_deg / 180.0))
 
 
 def _collect_path_metrics(
@@ -1069,6 +1104,7 @@ def _run_astar(
     near_blocked_penalty: float = 0.0,
     uncertainty_penalty: np.ndarray | None = None,
     risk_penalty: np.ndarray | None = None,
+    turn_weight: float = 0.028,
 ) -> list[tuple[int, int]]:
     h, w = blocked.shape
     gscore = np.full((h, w), np.inf, dtype=np.float64)
@@ -1100,7 +1136,7 @@ def _run_astar(
         for rr, cc in _neighbors(r, c, h, w):
             if closed[rr, cc] or blocked[rr, cc]:
                 continue
-            cand = cur_g + _transition_cost(
+            step_cost = _transition_cost(
                 from_rc=(r, c),
                 to_rc=(rr, cc),
                 geo=geo,
@@ -1113,6 +1149,9 @@ def _run_astar(
                 uncertainty_penalty=uncertainty_penalty,
                 risk_penalty=risk_penalty,
             )
+            prev_rc = came_from.get((r, c))
+            turn_penalty = _turn_penalty_km(prev_rc, (r, c), (rr, cc), step_km=step_cost, weight=turn_weight)
+            cand = cur_g + step_cost + turn_penalty
             if cand < gscore[rr, cc]:
                 gscore[rr, cc] = cand
                 came_from[(rr, cc)] = (r, c)
@@ -1359,6 +1398,7 @@ def _run_dstar_lite_static(
     near_blocked_penalty: float = 0.0,
     uncertainty_penalty: np.ndarray | None = None,
     risk_penalty: np.ndarray | None = None,
+    turn_weight: float = 0.026,
 ) -> list[tuple[int, int]]:
     """Static-grid backward potential field + greedy extraction."""
     g_to_goal = _compute_cost_to_goal(
@@ -1384,6 +1424,7 @@ def _run_dstar_lite_static(
     cells = [(sr, sc)]
     visited = {cells[0]}
     cur = (sr, sc)
+    prev_rc: tuple[int, int] | None = None
     max_steps = h * w
     for _ in range(max_steps):
         if cur == (gr, gc):
@@ -1397,7 +1438,7 @@ def _run_dstar_lite_static(
             tail = g_to_goal[rr, cc]
             if not np.isfinite(tail):
                 continue
-            cand = _transition_cost(
+            step_cost = _transition_cost(
                 from_rc=cur,
                 to_rc=(rr, cc),
                 geo=geo,
@@ -1409,7 +1450,8 @@ def _run_dstar_lite_static(
                 near_blocked_penalty=near_blocked_penalty,
                 uncertainty_penalty=uncertainty_penalty,
                 risk_penalty=risk_penalty,
-            ) + tail
+            )
+            cand = step_cost + tail + _turn_penalty_km(prev_rc, cur, (rr, cc), step_km=step_cost, weight=turn_weight)
             if cand < best_cost:
                 best_cost = cand
                 best_next = (rr, cc)
@@ -1420,6 +1462,7 @@ def _run_dstar_lite_static(
             raise PlanningError("Planner entered a loop while extracting path.")
         cells.append(best_next)
         visited.add(best_next)
+        prev_rc = cur
         cur = best_next
 
     raise PlanningError("No feasible route found under current blocked constraints.")
@@ -1759,6 +1802,7 @@ class _DStarLiteIncremental:
 
         path = [self.start]
         cur = self.start
+        prev_rc: tuple[int, int] | None = None
         visited = {cur}
         for _ in range(max_steps):
             if cur == self.goal:
@@ -1767,7 +1811,9 @@ class _DStarLiteIncremental:
             best_next = None
             best_cost = math.inf
             for nr, nc in _neighbors(cr, cc, self.h, self.w):
-                cand = self._cost(cur, (nr, nc)) + self.g[nr, nc]
+                step_cost = self._cost(cur, (nr, nc))
+                cand = step_cost + self.g[nr, nc]
+                cand += _turn_penalty_km(prev_rc, cur, (nr, nc), step_km=step_cost, weight=0.026)
                 if cand < best_cost:
                     best_cost = cand
                     best_next = (nr, nc)
@@ -1777,6 +1823,7 @@ class _DStarLiteIncremental:
                 raise PlanningError("D* Lite path extraction loop detected.")
             path.append(best_next)
             visited.add(best_next)
+            prev_rc = cur
             cur = best_next
         raise PlanningError("D* Lite failed to reach goal within step budget.")
 
@@ -1813,7 +1860,9 @@ def plan_grid_route_dynamic(
     dynamic_risk_warn_mode: str = "conservative",
     dynamic_risk_hard_mode: str = "conservative",
     dynamic_risk_switch_min_interval: int = 1,
+    progress_cb: ProgressCallback | None = None,
 ) -> PlanResult:
+    _emit_progress(progress_cb, "prepare", "Building dynamic planning timeline", 10)
     if len(timestamps) < 2:
         raise PlanningError("Dynamic replanning requires at least 2 timestamps.")
     if advance_steps < 1:
@@ -1903,6 +1952,7 @@ def plan_grid_route_dynamic(
     state_load_rows = [pair[1] for pair in load_pairs]
     state_load_wall_ms = (time.perf_counter() - state_load_t0) * 1000.0
     h, w = states[0].blocked.shape
+    _emit_progress(progress_cb, "risk", "Loading time-series risk states", 35)
     for state in states[1:]:
         if state.blocked.shape != (h, w):
             raise PlanningError("Dynamic replanning requires aligned grid shape across timestamps.")
@@ -2042,6 +2092,13 @@ def plan_grid_route_dynamic(
         return metrics
 
     for step_idx, state in enumerate(states):
+        dynamic_percent = 40 + int((step_idx / max(1, len(states))) * 45)
+        _emit_progress(
+            progress_cb,
+            "search",
+            f"Dynamic replanning step {step_idx + 1}/{len(states)}",
+            dynamic_percent,
+        )
         last_state_used = state
         step_t0 = time.perf_counter()
         step_cpu_t0 = time.process_time()
@@ -2395,16 +2452,13 @@ def plan_grid_route_dynamic(
         move_cells = current_cells
         smoothed_fallback = False
         smoothed_fallback_reason = ""
-        max_turn_limit_deg = 110.0
+        max_turn_limit_deg = 105.0
         if smoothing:
-            if is_any_angle or is_hybrid:
-                move_cells = _smooth_cells_los_constrained(
-                    current_cells,
-                    state.blocked,
-                    max_turn_deg=max_turn_limit_deg,
-                )
-            else:
-                move_cells = _smooth_cells_los(current_cells, state.blocked)
+            move_cells = _smooth_cells_with_marine_turns(
+                current_cells,
+                state.blocked,
+                max_turn_deg=max_turn_limit_deg,
+            )
         if not _is_path_feasible(move_cells, state.blocked):
             move_cells = current_cells
             smoothed_fallback = True
@@ -2822,6 +2876,7 @@ def plan_grid_route_dynamic(
             "feasible_smoothed_coordinates": executed_coords,
         },
     }
+    _emit_progress(progress_cb, "done", "Dynamic route planning completed", 100)
     return PlanResult(route_geojson=route_geojson, explain=explain)
 
 
@@ -2845,7 +2900,9 @@ def plan_grid_route(
     risk_budget: float = 1.0,
     confidence_level: float = 0.90,
     diversity_penalty: np.ndarray | None = None,
+    progress_cb: ProgressCallback | None = None,
 ) -> PlanResult:
+    _emit_progress(progress_cb, "prepare", "Loading navigation grid", 12)
     valid_caution_modes = {"tie_breaker", "budget", "minimize", "strict"}
     if caution_mode not in valid_caution_modes:
         raise PlanningError(f"Unsupported caution_mode={caution_mode}, expected one of {sorted(valid_caution_modes)}")
@@ -2866,6 +2923,7 @@ def plan_grid_route(
     h, w = blocked_bathy.shape
     geo = load_grid_geo(settings, timestamp=timestamp, shape=(h, w))
 
+    _emit_progress(progress_cb, "risk", "Preparing model and risk layers", 28)
     pred_path = settings.pred_root / model_version / f"{timestamp}.npy"
     if ("unet_blocked" in blocked_sources or caution_mode == "tie_breaker") and not pred_path.exists():
         run_unet_inference(
@@ -2914,6 +2972,7 @@ def plan_grid_route(
             )
         risk_penalty = risk_penalty + np.clip(diversity_penalty.astype(np.float32), 0.0, None)
 
+    _emit_progress(progress_cb, "search", "Searching best route", 55)
     bounds = GridBounds(
         lat_min=float(geo.bounds.lat_min),
         lat_max=float(geo.bounds.lat_max),
@@ -3038,15 +3097,13 @@ def plan_grid_route(
             "dstar_lite_recompute, any_angle, hybrid_astar".format(planner=planner)
         )
 
+    _emit_progress(progress_cb, "postprocess", "Smoothing and scoring route", 82)
     raw_cells = cells[:]
-    max_turn_limit_deg = 110.0
+    max_turn_limit_deg = 105.0
     smoothed_fallback = False
     smoothed_fallback_reason = ""
     if smoothing:
-        if is_any_angle or is_hybrid:
-            cells = _smooth_cells_los_constrained(raw_cells, blocked, max_turn_deg=max_turn_limit_deg)
-        else:
-            cells = _smooth_cells_los(raw_cells, blocked)
+        cells = _smooth_cells_with_marine_turns(raw_cells, blocked, max_turn_deg=max_turn_limit_deg)
     if not _is_path_feasible(cells, blocked):
         cells = raw_cells[:]
         smoothed_fallback = True
@@ -3199,4 +3256,5 @@ def plan_grid_route(
             "feasible_smoothed_coordinates": coords,
         },
     }
+    _emit_progress(progress_cb, "done", "Route planning completed", 100)
     return PlanResult(route_geojson=route_geojson, explain=explain)

@@ -14,6 +14,7 @@ import "leaflet/dist/leaflet.css";
 import { useEffect, useRef } from "react";
 
 import { getApiOrigin } from "../api/client";
+import type { GridBounds } from "../api/client";
 import { useLanguage } from "../contexts/LanguageContext";
 
 interface MapCanvasProps {
@@ -30,6 +31,7 @@ interface MapCanvasProps {
     wind: { enabled: boolean; opacity: number };
   };
   showRoute: boolean;
+  gridBounds?: GridBounds | null;
   routeGeojson?: {
     geometry?: { coordinates?: [number, number][] };
     properties?: Record<string, unknown> & { display_coordinates?: [number, number][] };
@@ -45,14 +47,21 @@ interface MapCanvasProps {
 }
 
 const API_ORIGIN = getApiOrigin();
-const INITIAL_BOUNDS: LatLngBoundsExpression = [
-  [60, 20],
-  [80, 180],
-];
-const AOI_BOUNDS: LatLngBoundsExpression = [
-  [60, 20],
-  [80, 180],
-];
+
+function toLeafletBounds(bounds?: GridBounds | null): LatLngBoundsExpression {
+  const valid =
+    bounds &&
+    Number.isFinite(bounds.lat_min) &&
+    Number.isFinite(bounds.lat_max) &&
+    Number.isFinite(bounds.lon_min) &&
+    Number.isFinite(bounds.lon_max) &&
+    bounds.lat_min < bounds.lat_max &&
+    bounds.lon_min < bounds.lon_max;
+  return [
+    [valid ? bounds.lat_min : 60, valid ? bounds.lon_min : 20],
+    [valid ? bounds.lat_max : 80, valid ? bounds.lon_max : 180],
+  ];
+}
 
 function RasterTileLayer({
   layerId,
@@ -150,6 +159,7 @@ export default function MapCanvas({
   tileRevision = 0,
   layoutKey = "auto",
   layers,
+  gridBounds,
   showRoute,
   routeGeojson,
   start,
@@ -201,12 +211,13 @@ export default function MapCanvas({
     () => (replayOverlay?.candidateSegment ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
     [replayOverlay?.candidateSegment]
   );
+  const mapBounds = useMemo(() => toLeafletBounds(gridBounds), [gridBounds]);
 
   return (
     <div className="absolute inset-0">
       <MapContainer
         key={`map-${layoutKey}-${timestamp}`}
-        bounds={INITIAL_BOUNDS}
+        bounds={mapBounds}
         className="h-full w-full"
         zoomSnap={0.25}
         minZoom={1}
@@ -223,7 +234,7 @@ export default function MapCanvas({
 
         <Pane name="aoi-frame" style={{ zIndex: 390 }}>
           <Rectangle
-            bounds={AOI_BOUNDS}
+            bounds={mapBounds}
             pathOptions={{
               color: "#0ea5e9",
               weight: 2,

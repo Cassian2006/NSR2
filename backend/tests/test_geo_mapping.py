@@ -92,3 +92,42 @@ def test_load_grid_geo_flips_meta_target_lat_to_descending(tmp_path) -> None:
     assert inside
     assert r == 0
     assert c == 0
+
+
+def test_load_grid_geo_falls_back_to_project_env_grids_when_demo_root_has_no_meta(tmp_path) -> None:
+    ts = "2024-07-15_00"
+    project_root = tmp_path / "repo"
+    annotation_pack_root = project_root / "backend" / "demo_data" / "processed" / "annotation_pack"
+    env_grids_root = project_root / "backend" / "demo_data" / "interim" / "env_grids"
+    project_env_grids_root = project_root / "data" / "interim" / "env_grids"
+
+    pack = annotation_pack_root / ts
+    pack.mkdir(parents=True, exist_ok=True)
+    (pack / "meta.json").write_text(json.dumps({"shape": [3, 4]}), encoding="utf-8")
+
+    env_meta_dir = project_env_grids_root / ts
+    env_meta_dir.mkdir(parents=True, exist_ok=True)
+    (env_meta_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "aoi_lat": [60.0, 80.0],
+                "aoi_lon": [20.0, 180.0],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = Settings(
+        project_root=project_root,
+        annotation_pack_root=annotation_pack_root,
+        env_grids_root=env_grids_root,
+        grid_lat_min=60.0,
+        grid_lat_max=86.0,
+        grid_lon_min=-180.0,
+        grid_lon_max=180.0,
+    )
+    geo = load_grid_geo(settings, timestamp=ts, shape=(3, 4))
+    assert geo.bounds.lat_min == 60.0
+    assert geo.bounds.lat_max == 80.0
+    assert geo.bounds.lon_min == 20.0
+    assert geo.bounds.lon_max == 180.0

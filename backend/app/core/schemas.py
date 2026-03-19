@@ -44,6 +44,7 @@ class PlanPolicy(BaseModel):
 
 class RoutePlanRequest(BaseModel):
     timestamp: str
+    progress_id: str | None = None
     start: Coord
     goal: Coord
     policy: PlanPolicy = Field(default_factory=PlanPolicy)
@@ -51,6 +52,7 @@ class RoutePlanRequest(BaseModel):
 
 class DynamicRoutePlanRequest(BaseModel):
     timestamps: list[str] = Field(min_length=2)
+    progress_id: str | None = None
     start: Coord
     goal: Coord
     advance_steps: int = Field(default=12, ge=1, le=500)

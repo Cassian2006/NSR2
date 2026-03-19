@@ -54,8 +54,26 @@ export type LayerInfo = {
   source?: string;
 };
 
+export type GridBounds = {
+  lat_min: number;
+  lat_max: number;
+  lon_min: number;
+  lon_max: number;
+};
+
+export type GridGeoDiagnostics = {
+  bounds: GridBounds;
+  shape: number[];
+  source: string;
+  detail: string;
+  fallback: boolean;
+  valid: boolean;
+  warnings: string[];
+};
+
 export type RoutePlanRequest = {
   timestamp: string;
+  progress_id?: string;
   start: { lat: number; lon: number };
   goal: { lat: number; lon: number };
   policy: {
@@ -85,6 +103,7 @@ export type RoutePlanRequest = {
 
 export type DynamicRoutePlanRequest = {
   timestamps: string[];
+  progress_id?: string;
   start: { lat: number; lon: number };
   goal: { lat: number; lon: number };
   advance_steps: number;
@@ -402,7 +421,9 @@ export async function getTimestamps(month?: string) {
 }
 
 export async function getLayers(timestamp: string) {
-  return apiFetch<{ timestamp: string; layers: LayerInfo[] }>(`/layers?timestamp=${encodeURIComponent(timestamp)}`);
+  return apiFetch<{ timestamp: string; layers: LayerInfo[]; bounds?: GridBounds | null; geo?: GridGeoDiagnostics | null }>(
+    `/layers?timestamp=${encodeURIComponent(timestamp)}`
+  );
 }
 
 export async function getVesselProfiles() {
@@ -528,8 +549,14 @@ export type LatestProgress = {
   updated_at?: string;
 };
 
+export type RouteProgress = LatestProgress;
+
 export async function getLatestProgress(progressId: string) {
   return apiFetch<LatestProgress>(`/latest/progress?progress_id=${encodeURIComponent(progressId)}`);
+}
+
+export async function getRouteProgress(progressId: string) {
+  return apiFetch<RouteProgress>(`/route/progress?progress_id=${encodeURIComponent(progressId)}`);
 }
 
 export async function runInference(payload: { timestamp: string; model_version?: string }) {

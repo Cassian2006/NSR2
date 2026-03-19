@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.planning.router import _build_display_coordinates, _collect_path_metrics, _line_of_sight, _smooth_cells_los
+from app.planning.router import (
+    _build_display_coordinates,
+    _collect_path_metrics,
+    _line_of_sight,
+    _max_turn_angle_deg,
+    _smooth_cells_los,
+    _smooth_cells_with_marine_turns,
+    _turn_penalty_km,
+)
 
 
 class _GeoStub:
@@ -69,3 +77,17 @@ def test_display_coordinates_are_smoothed_for_rendering() -> None:
     assert len(out) > len(base)
     assert out[0] == base[0]
     assert out[-1] == base[-1]
+
+
+def test_turn_penalty_is_positive_for_sharp_turn() -> None:
+    penalty = _turn_penalty_km((0, 0), (0, 1), (1, 1), step_km=10.0, weight=0.03)
+    assert penalty > 0.0
+
+
+def test_marine_turn_smoothing_limits_max_turn() -> None:
+    blocked = np.zeros((12, 12), dtype=bool)
+    path = [(0, 0), (0, 6), (3, 6), (3, 9), (9, 9)]
+    smoothed = _smooth_cells_with_marine_turns(path, blocked, max_turn_deg=105.0)
+    assert smoothed[0] == path[0]
+    assert smoothed[-1] == path[-1]
+    assert _max_turn_angle_deg(smoothed) <= 105.0 + 1e-6
