@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import io
 from pathlib import Path
 
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.core.config import Settings
-from app.core.risk_field import compute_risk_fields, get_risk_layer, get_risk_summary
+from app.core.risk_field import _compose_components, compute_risk_fields, get_risk_layer, get_risk_summary
+from app.core.render import BBox, render_overlay_png
 from app.main import app
 
 
@@ -90,7 +93,7 @@ def test_risk_field_compute_contract_and_cache(tmp_path: Path) -> None:
     summary = get_risk_summary(settings=settings, timestamp=ts)
     assert summary["shape"] == [h, w]
     assert "risk_mean" in summary["stats"]
-    assert summary["meta"]["risk_field_version"] == "risk_v1"
+    assert summary["meta"]["risk_field_version"] == "risk_v2"
 
 
 @pytest.fixture()
@@ -112,7 +115,7 @@ def test_risk_summary_api_and_overlay(client: TestClient) -> None:
     summary_resp = client.get("/v1/risk/summary", params={"timestamp": ts})
     assert summary_resp.status_code == 200
     payload = summary_resp.json()
-    assert payload["risk_field_version"] == "risk_v1"
+    assert payload["risk_field_version"] == "risk_v2"
     assert "stats" in payload
     assert "risk_mean" in payload["stats"]
 
@@ -125,4 +128,100 @@ def test_risk_summary_api_and_overlay(client: TestClient) -> None:
     assert overlay_resp.status_code == 200
     assert overlay_resp.headers["content-type"] == "image/png"
     assert len(overlay_resp.content) > 100
+
+
+def test_risk_field_treats_zero_ais_as_missing(tmp_path: Path) -> None:
+    settings = _settings_for_tmp(tmp_path)
+    ts = "2024-07-01_00"
+    h, w = 6, 8
+    ann = settings.annotation_pack_root / ts
+    ann.mkdir(parents=True, exist_ok=True)
+
+    x_stack = np.zeros((7, h, w), dtype=np.float32)
+    x_stack[0] = np.linspace(0, 100, num=h * w, dtype=np.float32).reshape(h, w)
+    x_stack[2] = np.linspace(0, 5, num=h * w, dtype=np.float32).reshape(h, w)
+    x_stack[3] = 3.0
+    x_stack[4] = 4.0
+    x_stack[5] = 0.0
+    np.save(ann / "x_stack.npy", x_stack)
+
+    blocked = np.zeros((h, w), dtype=np.uint8)
+    blocked[0, :] = 1
+    np.save(ann / "blocked_mask.npy", blocked)
+    (ann / "meta.json").write_text(
+        json.dumps(
+            {
+                "timestamp": ts,
+                "channel_names": ["ice_conc", "ice_thick", "wave_hs", "wind_u10", "wind_v10", "ais_heatmap", "bathy"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    pred_root = settings.pred_root / "unet_v1"
+    pred_root.mkdir(parents=True, exist_ok=True)
+    np.save(pred_root / f"{ts}.npy", np.zeros((h, w), dtype=np.uint8))
+    np.save(pred_root / f"{ts}_uncertainty.npy", np.full((h, w), 0.25, dtype=np.float32))
+
+    out = compute_risk_fields(settings=settings, timestamp=ts, force_refresh=True)
+    meta = out["meta"]
+    assert meta["risk_field_version"] == "risk_v2"
+    assert "ais_inverse" not in meta["present_sources"]
+    assert "ais_inverse" in meta["missing_sources"]
+
+
+def test_risk_field_prefers_probability_based_unet_component(tmp_path: Path) -> None:
+    settings = _settings_for_tmp(tmp_path)
+    ts = "2024-07-01_00"
+    h, w = 4, 5
+    ann = settings.annotation_pack_root / ts
+    ann.mkdir(parents=True, exist_ok=True)
+
+    x_stack = np.zeros((7, h, w), dtype=np.float32)
+    x_stack[0] = 20.0
+    x_stack[2] = 1.0
+    x_stack[3] = 2.0
+    x_stack[4] = 2.0
+    np.save(ann / "x_stack.npy", x_stack)
+    np.save(ann / "blocked_mask.npy", np.zeros((h, w), dtype=np.uint8))
+    (ann / "meta.json").write_text(
+        json.dumps(
+            {
+                "timestamp": ts,
+                "channel_names": ["ice_conc", "ice_thick", "wave_hs", "wind_u10", "wind_v10", "ais_heatmap", "bathy"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    pred_root = settings.pred_root / "unet_v1"
+    pred_root.mkdir(parents=True, exist_ok=True)
+    pred = np.zeros((h, w), dtype=np.uint8)
+    np.save(pred_root / f"{ts}.npy", pred)
+    np.save(pred_root / f"{ts}_uncertainty.npy", np.full((h, w), 0.1, dtype=np.float32))
+    probs = np.zeros((3, h, w), dtype=np.float32)
+    probs[0] = 0.2
+    probs[1] = 0.6
+    probs[2] = 0.2
+    np.save(pred_root / f"{ts}_probs.npy", probs)
+
+    components, _, meta = _compose_components(settings=settings, timestamp=ts, model_version="unet_v1")
+    assert "unet_pred" in meta["present_sources"]
+    unique_vals = np.unique(np.round(components["unet_pred"], 6))
+    assert unique_vals.size == 1
+    assert 0.0 < float(unique_vals[0]) < 1.0
+
+
+def test_risk_overlay_masks_background_when_ais_missing(client: TestClient) -> None:
+    overlay_resp = client.get("/v1/overlay/risk_mean.png", params={"timestamp": "2024-07-01_00", "bbox": "20,60,180,80", "size": "512,256"})
+    assert overlay_resp.status_code == 200
+    img = Image.open(io.BytesIO(overlay_resp.content)).convert("RGBA")
+    rgba = np.asarray(img, dtype=np.uint8)
+    alpha = rgba[..., 3]
+    assert 0.3 < float(np.mean(alpha > 0)) < 0.45
+    visible = rgba[alpha > 0][..., :3]
+    assert visible.size > 0
+    assert float(np.mean(visible[:, 1])) > float(np.mean(visible[:, 2]))
 

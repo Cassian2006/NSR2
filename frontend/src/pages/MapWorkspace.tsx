@@ -49,6 +49,7 @@ type LayerState = {
 
 type LayerStates = {
   bathymetry: LayerState;
+  riskMean: LayerState;
   aisHeatmap: LayerState;
   unetZones: LayerState;
   unetUncertainty: LayerState;
@@ -61,8 +62,9 @@ type LayoutMode = "auto" | "desktop" | "mobile";
 
 const DEFAULT_LAYERS: LayerStates = {
   bathymetry: { enabled: true, opacity: 80 },
-  aisHeatmap: { enabled: true, opacity: 60 },
-  unetZones: { enabled: true, opacity: 70 },
+  riskMean: { enabled: true, opacity: 72 },
+  aisHeatmap: { enabled: true, opacity: 55 },
+  unetZones: { enabled: false, opacity: 62 },
   unetUncertainty: { enabled: false, opacity: 65 },
   ice: { enabled: false, opacity: 50 },
   wave: { enabled: false, opacity: 50 },
@@ -71,12 +73,19 @@ const DEFAULT_LAYERS: LayerStates = {
 
 const AVAILABILITY_DEFAULT = {
   bathy: true,
+  risk_mean: true,
   ais_heatmap: true,
   unet_pred: false,
   unet_uncertainty: false,
   ice: true,
   wave: true,
   wind: true,
+};
+
+type AisSignalState = {
+  available: boolean;
+  signalMax: number;
+  nonzeroRatio: number;
 };
 
 function toLineCoords(value: unknown): [number, number][] {
@@ -114,6 +123,7 @@ export default function MapWorkspace() {
   const [availability, setAvailability] = useState(AVAILABILITY_DEFAULT);
   const [gridBounds, setGridBounds] = useState<GridBounds | null>(null);
   const [gridGeoInfo, setGridGeoInfo] = useState<GridGeoDiagnostics | null>(null);
+  const [aisSignal, setAisSignal] = useState<AisSignalState>({ available: true, signalMax: 0, nonzeroRatio: 0 });
 
   const [safetyPolicy, setSafetyPolicy] = useState("blocked-bathy-unet");
   const [cautionHandling, setCautionHandling] = useState("tiebreaker");
@@ -240,7 +250,7 @@ export default function MapWorkspace() {
         setTimestampOptions(res.timestamps);
         setTimestamp((prev) => {
           if (prev && res.timestamps.includes(prev)) return prev;
-          return queryTimestamp && res.timestamps.includes(queryTimestamp) ? queryTimestamp : res.timestamps[0] ?? "";
+          return queryTimestamp && res.timestamps.includes(queryTimestamp) ? queryTimestamp : res.timestamps[res.timestamps.length - 1] ?? "";
         });
       } catch (error) {
         console.warn("timestamps api unavailable", error);
@@ -299,9 +309,11 @@ export default function MapWorkspace() {
 
   const refreshLayerAvailability = useCallback(async (ts: string) => {
     const res = await getLayers(ts);
+    const aisLayer = res.layers.find((l) => l.id === "ais_heatmap");
     const nextAvailability = {
       bathy: res.layers.find((l) => l.id === "bathy")?.available ?? false,
-      ais_heatmap: res.layers.find((l) => l.id === "ais_heatmap")?.available ?? false,
+      risk_mean: res.layers.find((l) => l.id === "risk_mean")?.available ?? false,
+      ais_heatmap: aisLayer?.available ?? false,
       unet_pred: res.layers.find((l) => l.id === "unet_pred")?.available ?? false,
       unet_uncertainty: res.layers.find((l) => l.id === "unet_uncertainty")?.available ?? false,
       ice: res.layers.find((l) => l.id === "ice")?.available ?? false,
@@ -309,6 +321,11 @@ export default function MapWorkspace() {
       wind: res.layers.find((l) => l.id === "wind")?.available ?? false,
     };
     setAvailability(nextAvailability);
+    setAisSignal({
+      available: Boolean(aisLayer?.available),
+      signalMax: Number(aisLayer?.signal_max ?? 0),
+      nonzeroRatio: Number(aisLayer?.nonzero_ratio ?? 0),
+    });
     setGridGeoInfo(res.geo ?? null);
     const nextBounds = res.geo?.valid ? res.geo.bounds : res.bounds ?? null;
     if (res.geo && !res.geo.valid) {
@@ -317,6 +334,12 @@ export default function MapWorkspace() {
     setGridBounds(nextBounds);
     setTileRevision((prev) => prev + 1);
   }, []);
+
+  const aisLayerLabel = useMemo(() => {
+    if (!availability.ais_heatmap) return `${t("workspace.layer.ais")} （缺失）`;
+    if (aisSignal.signalMax <= 1e-6) return `${t("workspace.layer.ais")} （当前时刻无信号）`;
+    return `${t("workspace.layer.ais")} (${(aisSignal.nonzeroRatio * 100).toFixed(2)}% 航迹像元)`;
+  }, [aisSignal.nonzeroRatio, aisSignal.signalMax, availability.ais_heatmap, t]);
 
   useEffect(() => {
     if (!timestamp) return;
@@ -1239,7 +1262,14 @@ export default function MapWorkspace() {
                     onOpacityChange={(opacity) => handleOpacityChange("bathymetry", opacity)}
                   />
                   <LayerToggle
-                    name={`${t("workspace.layer.ais")} ${availability.ais_heatmap ? "" : "（缺失）"}`}
+                    name={`连续风险热力 ${availability.risk_mean ? "" : "（缺失）"}`}
+                    enabled={layers.riskMean.enabled}
+                    opacity={layers.riskMean.opacity}
+                    onToggle={(enabled) => handleLayerToggle("riskMean", enabled)}
+                    onOpacityChange={(opacity) => handleOpacityChange("riskMean", opacity)}
+                  />
+                  <LayerToggle
+                    name={aisLayerLabel}
                     enabled={layers.aisHeatmap.enabled}
                     opacity={layers.aisHeatmap.opacity}
                     onToggle={(enabled) => handleLayerToggle("aisHeatmap", enabled)}
@@ -1287,10 +1317,11 @@ export default function MapWorkspace() {
             <LegendCard
               title={t("workspace.legend")}
               items={[
-                { color: "#10b981", label: t("workspace.legend.safe"), description: t("workspace.legend.safe.desc") },
-                { color: "#f59e0b", label: t("workspace.legend.caution"), description: t("workspace.legend.caution.desc") },
-                { color: "#ef4444", label: t("workspace.legend.blocked"), description: t("workspace.legend.blocked.desc") },
+                { color: "#10b981", label: "低风险", description: "绿色表示当前综合风险较低，适合作为优先通行海域参考。" },
+                { color: "#f59e0b", label: "中风险", description: "黄色到橙色表示需要谨慎评估的连续风险带。" },
+                { color: "#ef4444", label: "高风险", description: "红色热点表示综合风险显著升高，规划会优先规避。" },
                 { color: "rgba(59, 130, 246, 0.6)", label: t("workspace.legend.ais"), description: t("workspace.legend.ais.desc") },
+                { color: "rgba(245, 158, 11, 0.9)", label: "U-Net 轮廓", description: "作为 caution / blocked 的辅助边界层，默认不再主导地图显示。" },
               ]}
             />
 

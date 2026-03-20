@@ -170,11 +170,29 @@ class DatasetService:
             return set()
         return {str(v) for v in names}
 
+    def _ais_signal_stats(self, heatmap_path: Path | None) -> dict[str, Any]:
+        if heatmap_path is None or not heatmap_path.exists():
+            return {"signal_max": 0.0, "nonzero_ratio": 0.0}
+        try:
+            arr = np.load(heatmap_path).astype(np.float32)
+        except Exception:
+            return {"signal_max": 0.0, "nonzero_ratio": 0.0}
+        finite = np.isfinite(arr)
+        if not finite.any():
+            return {"signal_max": 0.0, "nonzero_ratio": 0.0}
+        vals = arr[finite]
+        nonzero = np.abs(vals) > 1e-8
+        return {
+            "signal_max": float(np.max(vals)),
+            "nonzero_ratio": float(np.mean(nonzero.astype(np.float32))),
+        }
+
     def list_layers(self, timestamp: str) -> list[dict[str, Any]]:
         normalized = normalize_timestamp(timestamp)
         sample = self._scan_samples().get(normalized)
         legacy = self._legacy_entry_by_timestamp(normalized)
         local_heatmap = self._find_local_heatmap(normalized)
+        ais_signal = self._ais_signal_stats(local_heatmap)
         pred_file = self.settings.pred_root / "unet_v1" / f"{normalized}.npy"
         unc_file = self.settings.pred_root / "unet_v1" / f"{normalized}_uncertainty.npy"
         caution_file = self.settings.annotation_pack_root / normalized / "caution_mask.npy"
@@ -202,6 +220,8 @@ class DatasetService:
                 "available": local_heatmap is not None,
                 "unit": "score",
                 "source": str(local_heatmap) if local_heatmap else "",
+                "signal_max": ais_signal["signal_max"],
+                "nonzero_ratio": ais_signal["nonzero_ratio"],
             },
             {
                 "id": "unet_pred",

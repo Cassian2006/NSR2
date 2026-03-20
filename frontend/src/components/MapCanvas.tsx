@@ -23,6 +23,7 @@ interface MapCanvasProps {
   layoutKey?: string;
   layers: {
     bathymetry: { enabled: boolean; opacity: number };
+    riskMean: { enabled: boolean; opacity: number };
     aisHeatmap: { enabled: boolean; opacity: number };
     unetZones: { enabled: boolean; opacity: number };
     unetUncertainty: { enabled: boolean; opacity: number };
@@ -254,6 +255,7 @@ export default function MapCanvas({
         <RasterTileLayer layerId="ice" enabled={layers.ice.enabled} opacity={layers.ice.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={320} />
         <RasterTileLayer layerId="wave" enabled={layers.wave.enabled} opacity={layers.wave.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={330} />
         <RasterTileLayer layerId="wind" enabled={layers.wind.enabled} opacity={layers.wind.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={340} />
+        <RasterTileLayer layerId="risk_mean" enabled={layers.riskMean.enabled} opacity={layers.riskMean.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={350} />
         <RasterTileLayer layerId="ais_heatmap" enabled={layers.aisHeatmap.enabled} opacity={layers.aisHeatmap.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={360} />
         <RasterTileLayer layerId="unet_uncertainty" enabled={layers.unetUncertainty.enabled} opacity={layers.unetUncertainty.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={370} />
         <RasterTileLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={380} />

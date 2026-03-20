@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import base64
+import io
 from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.core.config import get_settings
 from app.core.dataset import normalize_timestamp
@@ -72,6 +74,8 @@ def test_layers(client: TestClient) -> None:
     assert payload["layers"]
     heat_item = next(item for item in payload["layers"] if item["id"] == "ais_heatmap")
     assert isinstance(heat_item["available"], bool)
+    assert isinstance(heat_item.get("signal_max"), (int, float))
+    assert isinstance(heat_item.get("nonzero_ratio"), (int, float))
 
 
 def test_timestamps_all_alias_returns_full_set(client: TestClient) -> None:
@@ -96,6 +100,17 @@ def test_overlay_and_tile_png(client: TestClient) -> None:
     assert tile.status_code == 200
     assert tile.headers["content-type"] == "image/png"
     assert len(tile.content) > 100
+
+
+def test_ais_zero_signal_overlay_is_transparent(client: TestClient) -> None:
+    overlay = client.get(
+        "/v1/overlay/ais_heatmap.png",
+        params={"timestamp": "2024-07-01_00", "bbox": "20,60,180,80", "size": "512,256"},
+    )
+    assert overlay.status_code == 200
+    img = Image.open(io.BytesIO(overlay.content)).convert("RGBA")
+    alpha = np.asarray(img, dtype=np.uint8)[..., 3]
+    assert int(alpha.max()) == 0
 
 
 def test_route_plan_and_gallery(client: TestClient) -> None:
@@ -577,6 +592,9 @@ def test_infer_persists_file(client: TestClient) -> None:
     assert payload["stats"].get("uncertainty_file")
     uncertainty_file = Path(str(payload["stats"]["uncertainty_file"]))
     assert uncertainty_file.exists()
+    assert payload["stats"].get("probs_file")
+    probs_file = Path(str(payload["stats"]["probs_file"]))
+    assert probs_file.exists()
 
     layers_resp = client.get("/v1/layers", params={"timestamp": ts})
     assert layers_resp.status_code == 200

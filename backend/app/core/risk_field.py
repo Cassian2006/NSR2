@@ -12,7 +12,7 @@ from app.core.uncertainty_runtime import calibrate_uncertainty_grid, load_uncert
 from app.model.infer import InferenceError, run_unet_inference
 
 
-RISK_FIELD_VERSION = "risk_v1"
+RISK_FIELD_VERSION = "risk_v2"
 _RISK_LAYERS = {"risk_mean", "risk_p90", "risk_std"}
 _WEIGHT_BASE = {
     "unet_pred": 0.34,
@@ -20,7 +20,6 @@ _WEIGHT_BASE = {
     "ice": 0.18,
     "wave": 0.14,
     "wind": 0.10,
-    "ais_inverse": 0.04,
 }
 
 
@@ -88,17 +87,32 @@ def _normalize_quantile(values: np.ndarray, sea_mask: np.ndarray) -> np.ndarray:
     return np.clip(out, 0.0, 1.0).astype(np.float32)
 
 
+def _elevate_component(values: np.ndarray, sea_mask: np.ndarray, *, threshold: float) -> np.ndarray:
+    v = np.clip(np.nan_to_num(values.astype(np.float32), nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+    out = np.zeros_like(v, dtype=np.float32)
+    mask = sea_mask & np.isfinite(v)
+    if not np.any(mask):
+        return out
+    thr = float(np.clip(threshold, 0.0, 0.95))
+    if thr <= 1e-6:
+        out[mask] = v[mask]
+        return out
+    out[mask] = np.clip((v[mask] - thr) / max(1e-6, 1.0 - thr), 0.0, 1.0)
+    return out
+
+
 def _load_unet_layers(
     *,
     settings: Settings,
     timestamp: str,
     shape: tuple[int, int],
     model_version: str,
-) -> tuple[np.ndarray | None, np.ndarray | None]:
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
     pred_path = settings.pred_root / model_version / f"{timestamp}.npy"
     unc_path = settings.pred_root / model_version / f"{timestamp}_uncertainty.npy"
+    probs_path = settings.pred_root / model_version / f"{timestamp}_probs.npy"
 
-    if not pred_path.exists() or not unc_path.exists():
+    if not pred_path.exists() or not unc_path.exists() or not probs_path.exists():
         try:
             run_unet_inference(
                 settings=settings,
@@ -111,6 +125,7 @@ def _load_unet_layers(
 
     pred = None
     unc = None
+    probs = None
     if pred_path.exists():
         try:
             p = np.load(pred_path).astype(np.float32)
@@ -125,7 +140,14 @@ def _load_unet_layers(
                 unc = np.clip(np.nan_to_num(u, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
         except Exception:
             unc = None
-    return pred, unc
+    if probs_path.exists():
+        try:
+            prob_arr = np.load(probs_path).astype(np.float32)
+            if prob_arr.shape == (3, *shape):
+                probs = np.clip(np.nan_to_num(prob_arr, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+        except Exception:
+            probs = None
+    return pred, unc, probs
 
 
 def _compose_components(
@@ -151,13 +173,19 @@ def _compose_components(
     missing_sources: list[str] = []
     calibration_meta: dict[str, Any] = {}
 
-    pred, unc = _load_unet_layers(
+    pred, unc, probs = _load_unet_layers(
         settings=settings,
         timestamp=timestamp,
         shape=(h, w),
         model_version=model_version,
     )
-    if pred is not None:
+    if probs is not None:
+        caution_prob = np.clip(probs[1], 0.0, 1.0)
+        blocked_prob = np.clip(probs[2], 0.0, 1.0)
+        pred_component = np.clip(0.55 * caution_prob + 1.0 * blocked_prob, 0.0, 1.0).astype(np.float32)
+        components["unet_pred"] = _elevate_component(pred_component, sea_mask, threshold=0.22)
+        present_sources.append("unet_pred")
+    elif pred is not None:
         pred_component = np.zeros((h, w), dtype=np.float32)
         pred_component[np.rint(pred).astype(np.int16) == 1] = 0.65
         pred_component[np.rint(pred).astype(np.int16) == 2] = 1.0
@@ -169,7 +197,11 @@ def _compose_components(
     if unc is not None:
         profile = load_uncertainty_calibration_profile(settings=settings, model_version=model_version)
         unc_cal = calibrate_uncertainty_grid(unc, temperature=profile.temperature)
-        components["uncertainty"] = unc_cal.astype(np.float32)
+        components["uncertainty"] = _elevate_component(
+            unc_cal,
+            sea_mask,
+            threshold=float(profile.uncertainty_threshold),
+        )
         present_sources.append("uncertainty")
         calibration_meta = {
             "available": bool(profile.available),
@@ -189,14 +221,14 @@ def _compose_components(
     if idx_ice is not None:
         ice_raw = x_stack[idx_ice]
         ice_norm = ice_raw / 100.0 if float(np.nanmax(np.abs(ice_raw))) > 2.0 else ice_raw
-        components["ice"] = np.clip(np.nan_to_num(ice_norm, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0).astype(np.float32)
+        components["ice"] = _elevate_component(ice_norm, sea_mask, threshold=0.10)
         present_sources.append("ice")
     else:
         missing_sources.append("ice")
 
     idx_wave = _channel_idx(channels, "wave_hs")
     if idx_wave is not None:
-        components["wave"] = _normalize_quantile(x_stack[idx_wave], sea_mask)
+        components["wave"] = _elevate_component(_normalize_quantile(x_stack[idx_wave], sea_mask), sea_mask, threshold=0.35)
         present_sources.append("wave")
     else:
         missing_sources.append("wave")
@@ -205,19 +237,12 @@ def _compose_components(
     idx_wind_v = _channel_idx(channels, "wind_v10")
     if idx_wind_u is not None and idx_wind_v is not None:
         wind_speed = np.sqrt(x_stack[idx_wind_u] ** 2 + x_stack[idx_wind_v] ** 2)
-        components["wind"] = _normalize_quantile(wind_speed, sea_mask)
+        components["wind"] = _elevate_component(_normalize_quantile(wind_speed, sea_mask), sea_mask, threshold=0.45)
         present_sources.append("wind")
     else:
         missing_sources.append("wind")
 
-    idx_ais = _channel_idx(channels, "ais_heatmap")
-    ais = x_stack[idx_ais] if idx_ais is not None else _load_ais_heatmap(settings, timestamp, (h, w))
-    if ais is not None and ais.shape == (h, w):
-        ais_norm = _normalize_quantile(ais, sea_mask)
-        components["ais_inverse"] = np.clip(1.0 - ais_norm, 0.0, 1.0).astype(np.float32)
-        present_sources.append("ais_inverse")
-    else:
-        missing_sources.append("ais_inverse")
+    missing_sources.append("ais_inverse")
 
     return components, blocked_mask, {
         "present_sources": present_sources,

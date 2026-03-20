@@ -70,9 +70,12 @@ def test_run_unet_inference_persists_and_hits_cache(tmp_path: Path) -> None:
     assert out_file.exists()
     unc_file = settings.pred_root / "unet_v1" / f"{ts}_uncertainty.npy"
     assert unc_file.exists()
+    probs_file = settings.pred_root / "unet_v1" / f"{ts}_probs.npy"
+    assert probs_file.exists()
     assert first["cache_hit"] is False
     assert first["shape"] == [24, 24]
     assert first["uncertainty_file"].endswith(f"{ts}_uncertainty.npy")
+    assert first["probs_file"].endswith(f"{ts}_probs.npy")
     assert isinstance(first["uncertainty_mean"], float)
     assert isinstance(first["uncertainty_p90"], float)
 
@@ -85,6 +88,7 @@ def test_run_unet_inference_persists_and_hits_cache(tmp_path: Path) -> None:
     assert second["cache_hit"] is True
     assert second["class_hist"]["safe"] + second["class_hist"]["caution"] + second["class_hist"]["blocked"] == 24 * 24
     assert second["uncertainty_file"].endswith(f"{ts}_uncertainty.npy")
+    assert second["probs_file"].endswith(f"{ts}_probs.npy")
 
 
 def test_run_unet_inference_uses_heuristic_fallback_when_torch_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,3 +139,6 @@ def test_run_unet_inference_uses_heuristic_fallback_when_torch_missing(tmp_path:
     assert out_file.exists()
     unc_file = settings.pred_root / "unet_v1" / f"{ts}_uncertainty.npy"
     assert unc_file.exists()
+    probs_file = settings.pred_root / "unet_v1" / f"{ts}_probs.npy"
+    assert probs_file.exists()
+    assert stats["probs_file"].endswith(f"{ts}_probs.npy")

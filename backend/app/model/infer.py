@@ -104,6 +104,21 @@ def _uncertainty_proxy_from_pred(pred: np.ndarray) -> np.ndarray:
     return np.clip(0.12 + 0.78 * smooth, 0.0, 1.0).astype(np.float32)
 
 
+def _probability_proxy_from_pred_uncertainty(pred: np.ndarray, uncertainty: np.ndarray) -> np.ndarray:
+    if pred.ndim != 2 or uncertainty.ndim != 2 or pred.shape != uncertainty.shape:
+        return np.zeros((3, 0, 0), dtype=np.float32)
+    p = np.rint(pred).astype(np.int16)
+    unc = np.clip(np.nan_to_num(uncertainty.astype(np.float32), nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+    primary = np.clip(1.0 - 0.72 * unc, 1.0 / 3.0, 1.0)
+    spill = np.clip((1.0 - primary) / 2.0, 0.0, 1.0)
+    probs = np.stack([spill.copy(), spill.copy(), spill.copy()], axis=0)
+    for cls in (0, 1, 2):
+        mask = p == cls
+        probs[cls, mask] = primary[mask]
+    denom = np.clip(probs.sum(axis=0, keepdims=True), 1e-6, None)
+    return (probs / denom).astype(np.float32)
+
+
 def _resolve_summary_path(settings: Settings, model_version: str) -> Path:
     default_summary = settings.unet_default_summary
     if model_version == "unet_v1" and default_summary.exists():
@@ -235,6 +250,7 @@ def _run_heuristic_fallback(
     x: np.ndarray,
     output_path: Path,
     uncertainty_path: Path,
+    probs_path: Path,
 ) -> dict:
     h, w = int(x.shape[1]), int(x.shape[2])
     channel_names = _load_channel_names(settings, timestamp, in_channels=int(x.shape[0]))
@@ -271,9 +287,11 @@ def _run_heuristic_fallback(
 
     uncertainty = np.clip(1.0 - np.abs(risk - threshold) / 0.35, 0.0, 1.0).astype(np.float32)
     uncertainty[blocked] = 0.05
+    probs = _probability_proxy_from_pred_uncertainty(pred, uncertainty)
 
     np.save(output_path, pred)
     np.save(uncertainty_path, uncertainty)
+    np.save(probs_path, probs)
 
     class_hist = _class_stats(pred)
     total = int(pred.size)
@@ -285,6 +303,7 @@ def _run_heuristic_fallback(
         "model_version": model_version,
         "fallback_mode": "heuristic_no_torch",
         "uncertainty_file": str(uncertainty_path),
+        "probs_file": str(probs_path),
         "uncertainty_mean": float(np.nanmean(uncertainty)),
         "uncertainty_p90": float(np.nanpercentile(uncertainty, 90)),
     }
@@ -299,6 +318,7 @@ def run_unet_inference(
 ) -> dict:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     uncertainty_path = output_path.with_name(f"{output_path.stem}_uncertainty.npy")
+    probs_path = output_path.with_name(f"{output_path.stem}_probs.npy")
     x = _load_x_stack(settings, timestamp=timestamp)
     expected_hw = (int(x.shape[1]), int(x.shape[2]))
 
@@ -308,13 +328,21 @@ def run_unet_inference(
             class_hist = _class_stats(pred)
             total = int(pred.size)
             unc: np.ndarray | None = None
+            probs: np.ndarray | None = None
             if uncertainty_path.exists():
                 loaded = np.load(uncertainty_path).astype(np.float32)
                 if loaded.shape == expected_hw:
                     unc = loaded
+            if probs_path.exists():
+                loaded_probs = np.load(probs_path).astype(np.float32)
+                if loaded_probs.shape == (3, *expected_hw):
+                    probs = loaded_probs
             if unc is None:
                 unc = _uncertainty_proxy_from_pred(pred)
                 np.save(uncertainty_path, unc.astype(np.float32))
+            if probs is None:
+                probs = _probability_proxy_from_pred_uncertainty(pred, unc)
+                np.save(probs_path, probs.astype(np.float32))
             uncertainty_mean = float(np.nanmean(unc))
             uncertainty_p90 = float(np.nanpercentile(unc, 90))
             return {
@@ -324,6 +352,7 @@ def run_unet_inference(
                 "cache_hit": True,
                 "model_version": model_version,
                 "uncertainty_file": str(uncertainty_path) if uncertainty_path.exists() else "",
+                "probs_file": str(probs_path) if probs_path.exists() else "",
                 "uncertainty_mean": uncertainty_mean,
                 "uncertainty_p90": uncertainty_p90,
             }
@@ -336,6 +365,7 @@ def run_unet_inference(
             x=x,
             output_path=output_path,
             uncertainty_path=uncertainty_path,
+            probs_path=probs_path,
         )
     summary_path = _resolve_summary_path(settings, model_version=model_version)
     bundle = _load_bundle(str(summary_path.resolve()))
@@ -354,9 +384,11 @@ def run_unet_inference(
         pred = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
         entropy = -(probs * torch.log(probs.clamp_min(1e-8))).sum(dim=1) / float(np.log(probs.shape[1]))
         uncertainty = entropy.squeeze(0).cpu().numpy().astype(np.float32)
+        probs_np = probs.squeeze(0).cpu().numpy().astype(np.float32)
 
     np.save(output_path, pred)
     np.save(uncertainty_path, uncertainty)
+    np.save(probs_path, probs_np)
     class_hist = _class_stats(pred)
     total = int(pred.size)
     return {
@@ -368,6 +400,7 @@ def run_unet_inference(
         "model_summary": str(summary_path),
         "device": bundle.device,
         "uncertainty_file": str(uncertainty_path),
+        "probs_file": str(probs_path),
         "uncertainty_mean": float(np.nanmean(uncertainty)),
         "uncertainty_p90": float(np.nanpercentile(uncertainty, 90)),
     }

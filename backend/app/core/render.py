@@ -221,6 +221,10 @@ def _render_continuous(
     alpha_min: int,
     alpha_max: int,
     value_mask: np.ndarray | None = None,
+    display_min: float | None = None,
+    display_max: float | None = None,
+    alpha_fixed: int | None = None,
+    gamma: float = 1.0,
 ) -> np.ndarray:
     image = _empty_image(sampled.shape[1], sampled.shape[0])
     finite = np.isfinite(sampled) & inside
@@ -230,18 +234,57 @@ def _render_continuous(
         return image
 
     vals = sampled[finite]
-    vmin = float(np.percentile(vals, 2))
-    vmax = float(np.percentile(vals, 98))
+    vmin = float(display_min) if display_min is not None else float(np.percentile(vals, 2))
+    vmax = float(display_max) if display_max is not None else float(np.percentile(vals, 98))
     if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
         vmax = vmin + 1.0
     norm = np.clip((sampled - vmin) / (vmax - vmin), 0.0, 1.0)
+    if abs(float(gamma) - 1.0) > 1e-6:
+        norm = np.power(norm, float(np.clip(gamma, 0.2, 4.0)), dtype=np.float32)
 
     rgb = _lerp_palette(norm, stops)
     image[..., :3] = rgb
 
-    alpha = (alpha_min + norm * (alpha_max - alpha_min)).astype(np.uint8)
+    if alpha_fixed is not None:
+        alpha = np.full(sampled.shape, int(np.clip(alpha_fixed, 0, 255)), dtype=np.uint8)
+    else:
+        alpha = (alpha_min + norm * (alpha_max - alpha_min)).astype(np.uint8)
     image[..., 3] = np.where(finite, alpha, 0).astype(np.uint8)
     return image
+
+
+def _alpha_composite(base: np.ndarray, overlay: np.ndarray) -> np.ndarray:
+    if base.shape != overlay.shape:
+        raise ValueError("base and overlay must have the same shape")
+    out = base.astype(np.float32).copy()
+    top = overlay.astype(np.float32)
+    top_alpha = top[..., 3:4] / 255.0
+    base_alpha = out[..., 3:4] / 255.0
+    out_alpha = top_alpha + base_alpha * (1.0 - top_alpha)
+    rgb = top[..., :3] * top_alpha + out[..., :3] * base_alpha * (1.0 - top_alpha)
+    out[..., :3] = np.divide(rgb, np.maximum(out_alpha, 1e-6), out=np.zeros_like(rgb), where=out_alpha > 1e-6)
+    out[..., 3:4] = out_alpha * 255.0
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _ais_signal_mask(sampled: np.ndarray, inside: np.ndarray, sea_mask: np.ndarray | None = None) -> np.ndarray:
+    mask = np.isfinite(sampled) & inside & (sampled > 1e-6)
+    if sea_mask is not None and sea_mask.shape == sampled.shape:
+        mask &= sea_mask
+    return mask
+
+
+def _elevated_value_mask(
+    sampled: np.ndarray,
+    inside: np.ndarray,
+    *,
+    threshold: float,
+    sea_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    mask = np.isfinite(sampled) & inside & (sampled >= float(threshold))
+    if sea_mask is not None and sea_mask.shape == sampled.shape:
+        mask &= sea_mask
+    return mask
 
 
 def _render_bathy(sampled: np.ndarray, inside: np.ndarray) -> np.ndarray:
@@ -260,6 +303,24 @@ def _render_bathy(sampled: np.ndarray, inside: np.ndarray) -> np.ndarray:
     return image
 
 
+def _mask_outline(mask: np.ndarray) -> np.ndarray:
+    if not mask.any():
+        return np.zeros_like(mask, dtype=bool)
+    pad = np.pad(mask, ((1, 1), (1, 1)), mode="constant", constant_values=False)
+    neighbors_all = (
+        pad[1:-1, 1:-1]
+        & pad[:-2, 1:-1]
+        & pad[2:, 1:-1]
+        & pad[1:-1, :-2]
+        & pad[1:-1, 2:]
+        & pad[:-2, :-2]
+        & pad[:-2, 2:]
+        & pad[2:, :-2]
+        & pad[2:, 2:]
+    )
+    return mask & ~neighbors_all
+
+
 def _render_unet(
     sampled: np.ndarray,
     inside: np.ndarray,
@@ -273,8 +334,13 @@ def _render_unet(
         bathy_blocked = (bathy_blocked_sampled > 0.5) & inside
         caution &= ~bathy_blocked
         blocked &= ~bathy_blocked
-    image[caution] = np.asarray([245, 158, 11, 145], dtype=np.uint8)
-    image[blocked] = np.asarray([239, 68, 68, 185], dtype=np.uint8)
+    caution_outline = _mask_outline(caution)
+    blocked_outline = _mask_outline(blocked)
+    blocked_fill = blocked & ~blocked_outline
+
+    image[caution_outline] = np.asarray([245, 158, 11, 185], dtype=np.uint8)
+    image[blocked_fill] = np.asarray([239, 68, 68, 72], dtype=np.uint8)
+    image[blocked_outline] = np.asarray([239, 68, 68, 205], dtype=np.uint8)
     return image
 
 
@@ -568,7 +634,9 @@ def render_overlay_png(
             stops=[(0.0, (16, 185, 129)), (0.5, (245, 158, 11)), (1.0, (220, 38, 38))],
             alpha_min=28,
             alpha_max=210,
-            value_mask=sea_mask,
+            value_mask=_elevated_value_mask(sampled_unc, inside, threshold=0.18, sea_mask=sea_mask),
+            display_min=0.18,
+            display_max=0.75,
         )
     elif layer == "ais_heatmap":
         sea_mask = None
@@ -583,6 +651,7 @@ def render_overlay_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
+        ais_mask = _ais_signal_mask(sampled, inside, sea_mask)
         image = _render_continuous(
             sampled,
             inside,
@@ -594,7 +663,7 @@ def render_overlay_png(
             ],
             alpha_min=20,
             alpha_max=185,
-            value_mask=sea_mask,
+            value_mask=ais_mask,
         )
     elif layer == "ice":
         sea_mask = None
@@ -689,19 +758,56 @@ def render_overlay_png(
             alpha_min, alpha_max = 30, 200
         else:
             stops = [
-                (0.0, (16, 185, 129)),
-                (0.5, (245, 158, 11)),
+                (0.0, (132, 204, 22)),
+                (0.62, (250, 204, 21)),
                 (1.0, (220, 38, 38)),
             ]
-            alpha_min, alpha_max = 25, 190
-        image = _render_continuous(
-            sampled,
-            inside,
-            stops=stops,
-            alpha_min=alpha_min,
-            alpha_max=alpha_max,
-            value_mask=sea_mask,
-        )
+            alpha_min, alpha_max = 88, 88
+        if layer == "risk_mean":
+            base = _render_continuous(
+                sampled,
+                inside,
+                stops=[(0.0, (86, 154, 92)), (1.0, (86, 154, 92))],
+                alpha_min=52,
+                alpha_max=52,
+                value_mask=sea_mask,
+                display_min=0.0,
+                display_max=1.0,
+                alpha_fixed=52,
+            )
+            hotspots = _render_continuous(
+                sampled,
+                inside,
+                stops=stops,
+                alpha_min=72,
+                alpha_max=156,
+                value_mask=_elevated_value_mask(
+                    sampled,
+                    inside,
+                    threshold=0.24,
+                    sea_mask=sea_mask,
+                ),
+                display_min=0.22,
+                display_max=0.78,
+                gamma=1.12,
+            )
+            image = _alpha_composite(base, hotspots)
+        else:
+            image = _render_continuous(
+                sampled,
+                inside,
+                stops=stops,
+                alpha_min=alpha_min,
+                alpha_max=alpha_max,
+                value_mask=_elevated_value_mask(
+                    sampled,
+                    inside,
+                    threshold=0.12 if layer == "risk_std" else 0.40,
+                    sea_mask=sea_mask,
+                ),
+                display_min=0.12 if layer == "risk_std" else 0.40,
+                display_max=0.45 if layer == "risk_std" else 0.95,
+            )
     else:
         image = _empty_image(width, height)
     return _encode_png_rgba(image)
@@ -789,7 +895,9 @@ def render_tile_png(
             stops=[(0.0, (16, 185, 129)), (0.5, (245, 158, 11)), (1.0, (220, 38, 38))],
             alpha_min=28,
             alpha_max=210,
-            value_mask=sea_mask,
+            value_mask=_elevated_value_mask(sampled_unc, inside, threshold=0.18, sea_mask=sea_mask),
+            display_min=0.18,
+            display_max=0.75,
         )
     elif layer == "ais_heatmap":
         sea_mask = None
@@ -803,6 +911,7 @@ def render_tile_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
+        ais_mask = _ais_signal_mask(sampled, inside, sea_mask)
         image = _render_continuous(
             sampled,
             inside,
@@ -814,7 +923,7 @@ def render_tile_png(
             ],
             alpha_min=20,
             alpha_max=185,
-            value_mask=sea_mask,
+            value_mask=ais_mask,
         )
     elif layer == "ice":
         sea_mask = None
@@ -905,19 +1014,56 @@ def render_tile_png(
             alpha_min, alpha_max = 30, 200
         else:
             stops = [
-                (0.0, (16, 185, 129)),
-                (0.5, (245, 158, 11)),
+                (0.0, (132, 204, 22)),
+                (0.62, (250, 204, 21)),
                 (1.0, (220, 38, 38)),
             ]
-            alpha_min, alpha_max = 25, 190
-        image = _render_continuous(
-            sampled,
-            inside,
-            stops=stops,
-            alpha_min=alpha_min,
-            alpha_max=alpha_max,
-            value_mask=sea_mask,
-        )
+            alpha_min, alpha_max = 88, 88
+        if layer == "risk_mean":
+            base = _render_continuous(
+                sampled,
+                inside,
+                stops=[(0.0, (86, 154, 92)), (1.0, (86, 154, 92))],
+                alpha_min=52,
+                alpha_max=52,
+                value_mask=sea_mask,
+                display_min=0.0,
+                display_max=1.0,
+                alpha_fixed=52,
+            )
+            hotspots = _render_continuous(
+                sampled,
+                inside,
+                stops=stops,
+                alpha_min=72,
+                alpha_max=156,
+                value_mask=_elevated_value_mask(
+                    sampled,
+                    inside,
+                    threshold=0.24,
+                    sea_mask=sea_mask,
+                ),
+                display_min=0.22,
+                display_max=0.78,
+                gamma=1.12,
+            )
+            image = _alpha_composite(base, hotspots)
+        else:
+            image = _render_continuous(
+                sampled,
+                inside,
+                stops=stops,
+                alpha_min=alpha_min,
+                alpha_max=alpha_max,
+                value_mask=_elevated_value_mask(
+                    sampled,
+                    inside,
+                    threshold=0.12 if layer == "risk_std" else 0.40,
+                    sea_mask=sea_mask,
+                ),
+                display_min=0.12 if layer == "risk_std" else 0.40,
+                display_max=0.45 if layer == "risk_std" else 0.95,
+            )
     else:
         image = _empty_image(tile_size, tile_size)
     return _encode_png_rgba(image)

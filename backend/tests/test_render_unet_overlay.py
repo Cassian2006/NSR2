@@ -11,8 +11,8 @@ def test_render_unet_keeps_caution_and_blocked_colors() -> None:
 
     out = _render_unet(sampled, inside)
     assert tuple(out[0, 0]) == (0, 0, 0, 0)
-    assert tuple(out[0, 1]) == (245, 158, 11, 145)
-    assert tuple(out[0, 2]) == (239, 68, 68, 185)
+    assert tuple(out[0, 1]) == (245, 158, 11, 185)
+    assert tuple(out[0, 2]) == (239, 68, 68, 205)
 
 
 def test_render_unet_hides_predictions_on_bathy_blocked_cells() -> None:
@@ -23,4 +23,23 @@ def test_render_unet_hides_predictions_on_bathy_blocked_cells() -> None:
     out = _render_unet(sampled, inside, bathy_blocked_sampled=bathy)
     assert tuple(out[0, 0]) == (0, 0, 0, 0)
     assert tuple(out[0, 1]) == (0, 0, 0, 0)
-    assert tuple(out[0, 2]) == (239, 68, 68, 185)
+    assert tuple(out[0, 2]) == (239, 68, 68, 205)
+
+
+def test_render_unet_prefers_boundaries_over_full_fill() -> None:
+    sampled = np.array(
+        [
+            [0, 0, 0, 0, 0],
+            [0, 1, 1, 1, 0],
+            [0, 1, 2, 1, 0],
+            [0, 1, 1, 1, 0],
+            [0, 0, 0, 0, 0],
+        ],
+        dtype=np.int16,
+    )
+    inside = np.ones_like(sampled, dtype=bool)
+    out = _render_unet(sampled, inside)
+    assert tuple(out[2, 2]) == (239, 68, 68, 205)
+    assert tuple(out[2, 1]) == (245, 158, 11, 185)
+    assert tuple(out[2, 3]) == (245, 158, 11, 185)
+    assert tuple(out[1, 2]) == (245, 158, 11, 185)

@@ -60,6 +60,42 @@ def test_render_continuous_respects_value_mask() -> None:
     assert int(image[0, 1, 3]) > 0
 
 
+def test_render_continuous_supports_fixed_alpha() -> None:
+    sampled = np.asarray([[0.1, 0.9]], dtype=np.float32)
+    inside = np.asarray([[True, True]], dtype=bool)
+    image = _render_continuous(
+        sampled,
+        inside,
+        stops=[(0.0, (0, 255, 0)), (1.0, (255, 0, 0))],
+        alpha_min=10,
+        alpha_max=200,
+        alpha_fixed=96,
+    )
+    assert int(image[0, 0, 3]) == 96
+    assert int(image[0, 1, 3]) == 96
+
+
+def test_render_continuous_supports_gamma() -> None:
+    sampled = np.asarray([[0.1, 0.4, 0.9]], dtype=np.float32)
+    inside = np.asarray([[True, True, True]], dtype=bool)
+    linear = _render_continuous(
+        sampled,
+        inside,
+        stops=[(0.0, (0, 255, 0)), (1.0, (255, 0, 0))],
+        alpha_min=80,
+        alpha_max=80,
+    )
+    gamma = _render_continuous(
+        sampled,
+        inside,
+        stops=[(0.0, (0, 255, 0)), (1.0, (255, 0, 0))],
+        alpha_min=80,
+        alpha_max=80,
+        gamma=0.5,
+    )
+    assert int(gamma[0, 1, 0]) > int(linear[0, 1, 0])
+
+
 def test_normalize_ice_sampled_fills_non_finite_as_zero() -> None:
     sampled = np.asarray([[np.nan, 12.0, -4.0, np.inf]], dtype=np.float32)
     out = _normalize_ice_sampled(sampled)

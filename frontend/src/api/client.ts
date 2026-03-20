@@ -52,6 +52,8 @@ export type LayerInfo = {
   available: boolean;
   unit?: string;
   source?: string;
+  signal_max?: number;
+  nonzero_ratio?: number;
 };
 
 export type GridBounds = {
