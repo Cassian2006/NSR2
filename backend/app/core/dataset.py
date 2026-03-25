@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from app.core.ais_display import build_ais_display_grid
 from app.core.config import get_settings
 from app.core.geo import get_grid_geo_diagnostics, load_grid_geo
 
@@ -170,12 +171,28 @@ class DatasetService:
             return set()
         return {str(v) for v in names}
 
-    def _ais_signal_stats(self, heatmap_path: Path | None) -> dict[str, Any]:
-        if heatmap_path is None or not heatmap_path.exists():
-            return {"signal_max": 0.0, "nonzero_ratio": 0.0}
-        try:
-            arr = np.load(heatmap_path).astype(np.float32)
-        except Exception:
+    def _ais_signal_stats(self, heatmap_path: Path | None, sample: SampleRecord | None) -> dict[str, Any]:
+        local = None
+        if heatmap_path is not None and heatmap_path.exists():
+            try:
+                local = np.load(heatmap_path).astype(np.float32)
+            except Exception:
+                local = None
+        shape = None
+        if sample and "blocked_mask.npy" in sample.files:
+            try:
+                blocked = np.load(sample.files["blocked_mask.npy"], mmap_mode="r")
+                if blocked.ndim == 2:
+                    shape = (int(blocked.shape[0]), int(blocked.shape[1]))
+            except Exception:
+                shape = None
+        arr = build_ais_display_grid(
+            ais_root=self.settings.ais_heatmap_root,
+            cleaned_root=self.settings.data_root / "processed" / "ais_cleaned",
+            local_grid=local,
+            shape=shape,
+        )
+        if arr is None:
             return {"signal_max": 0.0, "nonzero_ratio": 0.0}
         finite = np.isfinite(arr)
         if not finite.any():
@@ -192,7 +209,7 @@ class DatasetService:
         sample = self._scan_samples().get(normalized)
         legacy = self._legacy_entry_by_timestamp(normalized)
         local_heatmap = self._find_local_heatmap(normalized)
-        ais_signal = self._ais_signal_stats(local_heatmap)
+        ais_signal = self._ais_signal_stats(local_heatmap, sample)
         pred_file = self.settings.pred_root / "unet_v1" / f"{normalized}.npy"
         unc_file = self.settings.pred_root / "unet_v1" / f"{normalized}_uncertainty.npy"
         caution_file = self.settings.annotation_pack_root / normalized / "caution_mask.npy"
@@ -217,7 +234,7 @@ class DatasetService:
             {
                 "id": "ais_heatmap",
                 "name": "AIS Heatmap",
-                "available": local_heatmap is not None,
+                "available": local_heatmap is not None or ais_signal["signal_max"] > 0,
                 "unit": "score",
                 "source": str(local_heatmap) if local_heatmap else "",
                 "signal_max": ais_signal["signal_max"],

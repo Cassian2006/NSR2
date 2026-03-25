@@ -102,7 +102,7 @@ def test_overlay_and_tile_png(client: TestClient) -> None:
     assert len(tile.content) > 100
 
 
-def test_ais_zero_signal_overlay_is_transparent(client: TestClient) -> None:
+def test_ais_display_uses_history_prior_when_current_window_is_sparse(client: TestClient) -> None:
     overlay = client.get(
         "/v1/overlay/ais_heatmap.png",
         params={"timestamp": "2024-07-01_00", "bbox": "20,60,180,80", "size": "512,256"},
@@ -110,7 +110,8 @@ def test_ais_zero_signal_overlay_is_transparent(client: TestClient) -> None:
     assert overlay.status_code == 200
     img = Image.open(io.BytesIO(overlay.content)).convert("RGBA")
     alpha = np.asarray(img, dtype=np.uint8)[..., 3]
-    assert int(alpha.max()) == 0
+    alpha_ratio = float(np.mean(alpha > 0))
+    assert 0.10 < alpha_ratio < 0.25
 
 
 def test_route_plan_and_gallery(client: TestClient) -> None:

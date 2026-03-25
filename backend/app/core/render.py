@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
+from app.core.ais_display import build_ais_display_grid
 from app.core.config import Settings
 from app.core.geo import GridGeo, load_grid_geo
 from app.core.grid_alignment import get_timestamp_alignment
@@ -478,14 +479,25 @@ def _load_layer_grid(settings: Settings, timestamp: str, layer: str) -> np.ndarr
         return None
 
     if layer == "ais_heatmap":
+        local_ais = None
         if x_stack is not None:
             idx = _channel_idx(channels, "ais_heatmap")
             if idx is not None:
-                return x_stack[idx]
+                local_ais = x_stack[idx]
         hits = list(settings.ais_heatmap_root.rglob(f"{timestamp}.npy"))
         if hits:
-            return np.load(hits[0]).astype(np.float32)
-        return None
+            try:
+                local_ais = np.load(hits[0]).astype(np.float32)
+            except Exception:
+                pass
+        shape = tuple(blocked.shape) if blocked is not None else None
+        cleaned_root = settings.data_root / "processed" / "ais_cleaned"
+        return build_ais_display_grid(
+            ais_root=settings.ais_heatmap_root,
+            cleaned_root=cleaned_root,
+            local_grid=local_ais,
+            shape=shape,
+        )
 
     if layer == "unet_pred":
         pred_path = settings.pred_root / "unet_v1" / f"{timestamp}.npy"
@@ -651,20 +663,35 @@ def render_overlay_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
-        ais_mask = _ais_signal_mask(sampled, inside, sea_mask)
-        image = _render_continuous(
+        base = _render_continuous(
             sampled,
             inside,
             stops=[
-                (0.0, (25, 89, 190)),
-                (0.45, (56, 189, 248)),
-                (0.7, (251, 191, 36)),
+                (0.0, (44, 120, 198)),
+                (1.0, (44, 120, 198)),
+            ],
+            alpha_min=28,
+            alpha_max=28,
+            value_mask=_elevated_value_mask(sampled, inside, threshold=0.20, sea_mask=sea_mask),
+            display_min=0.0,
+            display_max=1.0,
+            alpha_fixed=28,
+        )
+        hotspots = _render_continuous(
+            sampled,
+            inside,
+            stops=[
+                (0.0, (92, 225, 230)),
+                (0.55, (250, 204, 21)),
                 (1.0, (220, 38, 38)),
             ],
-            alpha_min=20,
+            alpha_min=80,
             alpha_max=185,
-            value_mask=ais_mask,
+            value_mask=_elevated_value_mask(sampled, inside, threshold=0.24, sea_mask=sea_mask),
+            display_min=0.22,
+            display_max=0.95,
         )
+        image = _alpha_composite(base, hotspots)
     elif layer == "ice":
         sea_mask = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")
@@ -911,20 +938,35 @@ def render_tile_png(
                 mode="nearest",
             )
             sea_mask = bathy_sampled <= 0.5
-        ais_mask = _ais_signal_mask(sampled, inside, sea_mask)
-        image = _render_continuous(
+        base = _render_continuous(
             sampled,
             inside,
             stops=[
-                (0.0, (25, 89, 190)),
-                (0.45, (56, 189, 248)),
-                (0.7, (251, 191, 36)),
+                (0.0, (44, 120, 198)),
+                (1.0, (44, 120, 198)),
+            ],
+            alpha_min=28,
+            alpha_max=28,
+            value_mask=_elevated_value_mask(sampled, inside, threshold=0.20, sea_mask=sea_mask),
+            display_min=0.0,
+            display_max=1.0,
+            alpha_fixed=28,
+        )
+        hotspots = _render_continuous(
+            sampled,
+            inside,
+            stops=[
+                (0.0, (92, 225, 230)),
+                (0.55, (250, 204, 21)),
                 (1.0, (220, 38, 38)),
             ],
-            alpha_min=20,
+            alpha_min=80,
             alpha_max=185,
-            value_mask=ais_mask,
+            value_mask=_elevated_value_mask(sampled, inside, threshold=0.24, sea_mask=sea_mask),
+            display_min=0.22,
+            display_max=0.95,
         )
+        image = _alpha_composite(base, hotspots)
     elif layer == "ice":
         sea_mask = None
         bathy_grid = _load_layer_grid(settings, timestamp, "bathy")

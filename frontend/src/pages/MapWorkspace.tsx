@@ -337,8 +337,8 @@ export default function MapWorkspace() {
 
   const aisLayerLabel = useMemo(() => {
     if (!availability.ais_heatmap) return `${t("workspace.layer.ais")} （缺失）`;
-    if (aisSignal.signalMax <= 1e-6) return `${t("workspace.layer.ais")} （当前时刻无信号）`;
-    return `${t("workspace.layer.ais")} (${(aisSignal.nonzeroRatio * 100).toFixed(2)}% 航迹像元)`;
+    if (aisSignal.signalMax <= 1e-6) return `${t("workspace.layer.ais")} （历史走廊增强）`;
+    return `${t("workspace.layer.ais")} (${(aisSignal.nonzeroRatio * 100).toFixed(2)}% 航道展示像元)`;
   }, [aisSignal.nonzeroRatio, aisSignal.signalMax, availability.ais_heatmap, t]);
 
   useEffect(() => {
