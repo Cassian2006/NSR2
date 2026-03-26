@@ -152,6 +152,10 @@ class DatasetService:
         root = self.settings.ais_heatmap_root
         if not root.exists():
             return None
+        for tag in ("demo_v1", "demo", "7d", "smoke24h"):
+            candidate = root / tag / f"{timestamp}.npy"
+            if candidate.exists():
+                return candidate
         for p in root.rglob(f"{timestamp}.npy"):
             return p
         return None
@@ -178,6 +182,16 @@ class DatasetService:
                 local = np.load(heatmap_path).astype(np.float32)
             except Exception:
                 local = None
+        if heatmap_path is not None and heatmap_path.exists() and heatmap_path.parent.name == "demo_v1" and local is not None:
+            finite = np.isfinite(local)
+            if not finite.any():
+                return {"signal_max": 0.0, "nonzero_ratio": 0.0}
+            vals = local[finite]
+            nonzero = np.abs(vals) > 1e-8
+            return {
+                "signal_max": float(np.max(vals)),
+                "nonzero_ratio": float(np.mean(nonzero.astype(np.float32))),
+            }
         shape = None
         if sample and "blocked_mask.npy" in sample.files:
             try:

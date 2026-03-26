@@ -6,6 +6,7 @@ import {
   Polyline,
   Rectangle,
   TileLayer,
+  Tooltip,
   useMap,
   useMapEvents,
 } from "react-leaflet";
@@ -35,8 +36,21 @@ interface MapCanvasProps {
   gridBounds?: GridBounds | null;
   routeGeojson?: {
     geometry?: { coordinates?: [number, number][] };
-    properties?: Record<string, unknown> & { display_coordinates?: [number, number][] };
+    properties?: Record<string, unknown> & {
+      display_coordinates?: [number, number][];
+      feasible_smoothed_coordinates?: [number, number][];
+      raw_coordinates?: [number, number][];
+    };
   };
+  secondaryRouteGeojsons?: Array<{
+    geometry?: { coordinates?: [number, number][] };
+    properties?: Record<string, unknown> & {
+      display_coordinates?: [number, number][];
+      feasible_smoothed_coordinates?: [number, number][];
+      raw_coordinates?: [number, number][];
+    };
+  }>;
+  selectedRouteKey?: string;
   start?: { lat: number; lon: number };
   goal?: { lat: number; lon: number };
   onMapClick?: (lat: number, lon: number) => void;
@@ -62,6 +76,36 @@ function toLeafletBounds(bounds?: GridBounds | null): LatLngBoundsExpression {
     [valid ? bounds.lat_min : 60, valid ? bounds.lon_min : 20],
     [valid ? bounds.lat_max : 80, valid ? bounds.lon_max : 180],
   ];
+}
+
+function normalizeRoutePoint(
+  point: [number, number],
+  bounds?: GridBounds | null
+): [number, number] {
+  const [a, b] = point;
+  const latMin = bounds?.lat_min ?? 60;
+  const latMax = bounds?.lat_max ?? 80;
+  const lonMin = bounds?.lon_min ?? 20;
+  const lonMax = bounds?.lon_max ?? 180;
+  const aLooksLikeLon = a >= lonMin && a <= lonMax;
+  const bLooksLikeLat = b >= latMin && b <= latMax;
+  const aLooksLikeLat = a >= latMin && a <= latMax;
+  const bLooksLikeLon = b >= lonMin && b <= lonMax;
+
+  if (aLooksLikeLon && bLooksLikeLat) {
+    return [b, a];
+  }
+  if (aLooksLikeLat && bLooksLikeLon) {
+    return [a, b];
+  }
+  return [b, a];
+}
+
+function normalizeRouteCoords(
+  coords: [number, number][],
+  bounds?: GridBounds | null
+): [number, number][] {
+  return coords.map((point) => normalizeRoutePoint(point, bounds));
 }
 
 function RasterTileLayer({
@@ -155,6 +199,31 @@ function MapResizeGuard({ layoutKey }: { layoutKey: string }) {
   return null;
 }
 
+function RouteFocusGuard({
+  routeLatLng,
+  selectedRouteKey,
+}: {
+  routeLatLng: [number, number][];
+  selectedRouteKey: string;
+}) {
+  const map = useMap();
+  const lastKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    if (routeLatLng.length < 2) return;
+    if (lastKeyRef.current === selectedRouteKey) return;
+    lastKeyRef.current = selectedRouteKey;
+    map.fitBounds(routeLatLng, {
+      padding: [28, 28],
+      maxZoom: 6,
+      animate: true,
+      duration: 0.45,
+    });
+  }, [map, routeLatLng, selectedRouteKey]);
+
+  return null;
+}
+
 export default function MapCanvas({
   timestamp,
   tileRevision = 0,
@@ -163,6 +232,8 @@ export default function MapCanvas({
   gridBounds,
   showRoute,
   routeGeojson,
+  secondaryRouteGeojsons,
+  selectedRouteKey = "requested",
   start,
   goal,
   onMapClick,
@@ -195,22 +266,46 @@ export default function MapCanvas({
   };
 
   const routeLatLng = useMemo(() => {
-    const displayCoords = routeGeojson?.properties?.display_coordinates;
-    const coords = displayCoords && displayCoords.length >= 2 ? displayCoords : routeGeojson?.geometry?.coordinates ?? [];
-    return coords.map(([lon, lat]) => [lat, lon] as [number, number]);
-  }, [routeGeojson]);
+    const rawCoords = routeGeojson?.properties?.raw_coordinates;
+    const feasibleCoords = routeGeojson?.properties?.feasible_smoothed_coordinates;
+    const coords =
+      rawCoords && rawCoords.length >= 2
+        ? rawCoords
+        : feasibleCoords && feasibleCoords.length >= 2
+          ? feasibleCoords
+          : routeGeojson?.geometry?.coordinates ?? [];
+    return normalizeRouteCoords(coords, gridBounds);
+  }, [gridBounds, routeGeojson]);
+
+  const secondaryRoutesLatLng = useMemo(
+    () =>
+      (secondaryRouteGeojsons ?? [])
+        .map((feature) => {
+          const rawCoords = feature?.properties?.raw_coordinates;
+          const feasibleCoords = feature?.properties?.feasible_smoothed_coordinates;
+          const coords =
+            rawCoords && rawCoords.length >= 2
+              ? rawCoords
+              : feasibleCoords && feasibleCoords.length >= 2
+                ? feasibleCoords
+                : feature?.geometry?.coordinates ?? [];
+          return normalizeRouteCoords(coords, gridBounds);
+        })
+        .filter((coords) => coords.length >= 2),
+    [gridBounds, secondaryRouteGeojsons]
+  );
 
   const replayExecutedLatLng = useMemo(
-    () => (replayOverlay?.executedCoordinates ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
-    [replayOverlay?.executedCoordinates]
+    () => normalizeRouteCoords(replayOverlay?.executedCoordinates ?? [], gridBounds),
+    [gridBounds, replayOverlay?.executedCoordinates]
   );
   const replayCurrentLatLng = useMemo(
-    () => (replayOverlay?.currentSegment ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
-    [replayOverlay?.currentSegment]
+    () => normalizeRouteCoords(replayOverlay?.currentSegment ?? [], gridBounds),
+    [gridBounds, replayOverlay?.currentSegment]
   );
   const replayCandidateLatLng = useMemo(
-    () => (replayOverlay?.candidateSegment ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
-    [replayOverlay?.candidateSegment]
+    () => normalizeRouteCoords(replayOverlay?.candidateSegment ?? [], gridBounds),
+    [gridBounds, replayOverlay?.candidateSegment]
   );
   const mapBounds = useMemo(() => toLeafletBounds(gridBounds), [gridBounds]);
 
@@ -227,6 +322,7 @@ export default function MapCanvas({
         preferCanvas
       >
         <MapResizeGuard layoutKey={`${layoutKey}:${timestamp}`} />
+        {showRoute && routeLatLng.length >= 2 ? <RouteFocusGuard routeLatLng={routeLatLng} selectedRouteKey={selectedRouteKey} /> : null}
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"
@@ -260,8 +356,45 @@ export default function MapCanvas({
         <RasterTileLayer layerId="unet_uncertainty" enabled={layers.unetUncertainty.enabled} opacity={layers.unetUncertainty.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={370} />
         <RasterTileLayer layerId="unet_pred" enabled={layers.unetZones.enabled} opacity={layers.unetZones.opacity} timestamp={timestamp} tileRevision={tileRevision ?? 0} zIndex={380} />
 
+        {showRoute
+          ? secondaryRoutesLatLng.map((coords, index) => (
+              <Pane key={`secondary-route-${index}`} name={`secondary-route-pane-${index}`} style={{ zIndex: 385 }}>
+                <Polyline
+                  positions={coords}
+                  pathOptions={{
+                    color: "#6b7280",
+                    weight: 3,
+                    opacity: 0.38,
+                    dashArray: "10 8",
+                    lineCap: "round",
+                    lineJoin: "round",
+                    className: "map-route-secondary",
+                  }}
+                />
+                <CircleMarker
+                  center={coords[Math.max(0, Math.floor(coords.length / 2))]}
+                  radius={10}
+                  pathOptions={{ color: "#475569", weight: 1.5, fillColor: "#f8fafc", fillOpacity: 0.92 }}
+                >
+                  <Tooltip permanent direction="center" offset={[0, 0]} opacity={1}>
+                    <span className="text-[10px] font-semibold text-slate-700">#{index + 1}</span>
+                  </Tooltip>
+                </CircleMarker>
+              </Pane>
+            ))
+          : null}
         {showRoute && routeLatLng.length >= 2 ? (
-          <Polyline positions={routeLatLng} pathOptions={{ color: "#1e40af", weight: 4, opacity: 0.95 }} />
+          <Polyline
+            positions={routeLatLng}
+            pathOptions={{
+              color: "#1e40af",
+              weight: 4.5,
+              opacity: 0.98,
+              lineCap: "round",
+              lineJoin: "round",
+              className: "map-route-primary",
+            }}
+          />
         ) : null}
         {replayCandidateLatLng.length >= 2 ? (
           <Polyline

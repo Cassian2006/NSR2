@@ -14,6 +14,7 @@ import {
   getLatestProgress,
   getRouteProgress,
   getLatestStatus,
+  getStormglassConfig,
   getTimestamps,
   getCopernicusConfig,
   planDynamicRoute,
@@ -27,6 +28,7 @@ import {
   type RoutePlanResponse,
   type GridBounds,
   type GridGeoDiagnostics,
+  type CustomVesselPolicy,
   type VesselProfile,
 } from "../api/client";
 import CoordinateInput from "../components/CoordinateInput";
@@ -114,10 +116,10 @@ export default function MapWorkspace() {
 
   const [timestampOptions, setTimestampOptions] = useState<string[]>([]);
   const [timestamp, setTimestamp] = useState(queryTimestamp);
-  const [startLat, setStartLat] = useState("70.5000");
-  const [startLon, setStartLon] = useState("30.0000");
-  const [goalLat, setGoalLat] = useState("72.0000");
-  const [goalLon, setGoalLon] = useState("150.0000");
+  const [startLat, setStartLat] = useState("66.5000");
+  const [startLon, setStartLon] = useState("40.8333");
+  const [goalLat, setGoalLat] = useState("70.3333");
+  const [goalLon, setGoalLon] = useState("170.0833");
 
   const [layers, setLayers] = useState<LayerStates>(DEFAULT_LAYERS);
   const [availability, setAvailability] = useState(AVAILABILITY_DEFAULT);
@@ -127,7 +129,8 @@ export default function MapWorkspace() {
 
   const [safetyPolicy, setSafetyPolicy] = useState("blocked-bathy-unet");
   const [cautionHandling, setCautionHandling] = useState("tiebreaker");
-  const [corridorBias, setCorridorBias] = useState([20]);
+  const [aisCorridorEnabled, setAisCorridorEnabled] = useState(true);
+  const [corridorBias, setCorridorBias] = useState([85]);
   const [routeResult, setRouteResult] = useState<RoutePlanResponse | null>(null);
   const [planning, setPlanning] = useState(false);
   const [latestPlanning, setLatestPlanning] = useState(false);
@@ -139,8 +142,23 @@ export default function MapWorkspace() {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("auto");
   const [isWideViewport, setIsWideViewport] = useState(false);
   const [plannerMode, setPlannerMode] = useState("dstar_lite");
-  const [vesselProfileId, setVesselProfileId] = useState("arc7_lng");
+  const [vesselProfileId, setVesselProfileId] = useState("custom");
   const [vesselProfiles, setVesselProfiles] = useState<VesselProfile[]>([]);
+  const [customVessel, setCustomVessel] = useState<CustomVesselPolicy>({
+      name: "Custom Vessel",
+      polar_category: "B",
+      ice_class: "Custom",
+      draft_m: 10,
+      min_safe_depth_m: 0,
+      risk_mode: "balanced",
+      risk_weight_scale: 1,
+      risk_budget: 1,
+      confidence_level: 0.9,
+      corridor_bias_multiplier: 1,
+      ice_risk_multiplier: 1,
+      max_ice_conc: 1,
+      max_ice_thickness_m: 10,
+    });
   const [riskMode, setRiskMode] = useState("balanced");
   const [riskWeightScale, setRiskWeightScale] = useState([100]);
   const [riskConstraintMode, setRiskConstraintMode] = useState("none");
@@ -178,6 +196,15 @@ export default function MapWorkspace() {
     wind_dataset_id: "",
   });
   const [copernicusConfigured, setCopernicusConfigured] = useState(false);
+  const [stormglassConfig, setStormglassConfig] = useState<{
+    configured: boolean;
+    api_key_set: boolean;
+    source_preference: string;
+    sample_lat_count: number;
+    sample_lon_count: number;
+    request_timeout_sec: number;
+    cache_root: string;
+  } | null>(null);
   const [latestMeta, setLatestMeta] = useState<Record<string, unknown> | null>(null);
   const [complianceNotices, setComplianceNotices] = useState<ComplianceNoticesPayload | null>(null);
   const [routeProgress, setRouteProgress] = useState({
@@ -221,6 +248,13 @@ export default function MapWorkspace() {
     return `${match[1]}-${match[2]}:00`;
   }, []);
 
+  const pickPreferredTimestamp = useCallback((items: string[]) => {
+    if (!items.length) return "";
+    const demoSeason = items.filter((ts) => /^2024-(07|08|09|10)-/.test(ts));
+    if (demoSeason.length) return demoSeason[demoSeason.length - 1] ?? items[items.length - 1] ?? "";
+    return items[items.length - 1] ?? "";
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mql = window.matchMedia("(min-width: 1024px)");
@@ -250,7 +284,7 @@ export default function MapWorkspace() {
         setTimestampOptions(res.timestamps);
         setTimestamp((prev) => {
           if (prev && res.timestamps.includes(prev)) return prev;
-          return queryTimestamp && res.timestamps.includes(queryTimestamp) ? queryTimestamp : res.timestamps[res.timestamps.length - 1] ?? "";
+          return queryTimestamp && res.timestamps.includes(queryTimestamp) ? queryTimestamp : pickPreferredTimestamp(res.timestamps);
         });
       } catch (error) {
         console.warn("timestamps api unavailable", error);
@@ -260,7 +294,7 @@ export default function MapWorkspace() {
     return () => {
       active = false;
     };
-  }, [queryTimestamp]);
+  }, [pickPreferredTimestamp, queryTimestamp]);
 
   useEffect(() => {
     let active = true;
@@ -335,6 +369,24 @@ export default function MapWorkspace() {
     setTileRevision((prev) => prev + 1);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    async function loadStormglassStatus() {
+      try {
+        const res = await getStormglassConfig();
+        if (!active) return;
+        setStormglassConfig(res);
+      } catch {
+        if (!active) return;
+        setStormglassConfig(null);
+      }
+    }
+    loadStormglassStatus();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const aisLayerLabel = useMemo(() => {
     if (!availability.ais_heatmap) return `${t("workspace.layer.ais")} （缺失）`;
     if (aisSignal.signalMax <= 1e-6) return `${t("workspace.layer.ais")} （历史走廊增强）`;
@@ -403,6 +455,14 @@ export default function MapWorkspace() {
   }, [routeCandidates, selectedCandidateId]);
 
   const activeRouteGeojson = activeCandidate?.route_geojson ?? routeResult?.route_geojson ?? null;
+  const secondaryRouteGeojsons = useMemo(
+    () =>
+      routeCandidates
+        .filter((c) => c.status === "ok" && c.id !== activeCandidate?.id && c.route_geojson)
+        .map((c) => c.route_geojson!)
+        .slice(0, 6),
+    [activeCandidate?.id, routeCandidates]
+  );
   const routeMetrics = (activeCandidate?.explain as RoutePlanResponse["explain"] | undefined) ?? routeResult?.explain;
   const dynamicExecutionLog = useMemo(() => {
     const raw = (routeMetrics?.dynamic_execution_log ?? []) as unknown[];
@@ -509,6 +569,10 @@ export default function MapWorkspace() {
     }),
     [routeMetrics]
   );
+  const effectiveCustomVessel = useMemo(
+    () => (vesselProfileId === "custom" ? customVessel : undefined),
+    [customVessel, vesselProfileId]
+  );
   const riskConstraintModeResult = String((routeMetrics as any)?.risk_constraint_mode ?? "none");
   const riskConstraintSatisfiedResult = Boolean((routeMetrics as any)?.risk_constraint_satisfied ?? true);
   const riskBudgetUsagePctResult = Number((routeMetrics as any)?.risk_budget_usage ?? 0) * 100;
@@ -573,6 +637,44 @@ export default function MapWorkspace() {
     };
     return labels[phase] ?? phase;
   }, [routeProgress.phase]);
+
+  const activePlanningProgress = useMemo(() => {
+    if (latestPlanning && latestProgress.status === "running") {
+      return {
+        tone: "slate" as const,
+        title: "最新预报规划进度",
+        phaseText: latestPhaseText,
+        percent: latestProgress.percent,
+        message: latestProgress.message,
+        error: latestProgress.error,
+      };
+    }
+    if ((planning || dynamicPlanning) && routeProgress.status === "running") {
+      return {
+        tone: "emerald" as const,
+        title: dynamicPlanning ? "时序重规划进度" : "航线规划进度",
+        phaseText: routePhaseText,
+        percent: routeProgress.percent,
+        message: routeProgress.message,
+        error: routeProgress.error,
+      };
+    }
+    return null;
+  }, [
+    dynamicPlanning,
+    latestPhaseText,
+    latestPlanning,
+    latestProgress.error,
+    latestProgress.message,
+    latestProgress.percent,
+    latestProgress.status,
+    planning,
+    routePhaseText,
+    routeProgress.error,
+    routeProgress.message,
+    routeProgress.percent,
+    routeProgress.status,
+  ]);
 
   const freshnessStatusKey =
     complianceNotices?.data_freshness?.status && ["fresh", "stale", "outdated", "unknown"].includes(String(complianceNotices.data_freshness.status))
@@ -680,6 +782,7 @@ export default function MapWorkspace() {
           objective: "shortest_distance_under_safety",
           blocked_sources: blockedSources,
           caution_mode: cautionMode,
+          ais_corridor_enabled: aisCorridorEnabled,
           corridor_bias: corridorBias[0] / 100,
           smoothing: true,
           planner: plannerMode,
@@ -691,6 +794,7 @@ export default function MapWorkspace() {
           return_candidates: returnCandidates,
           candidate_limit: candidateLimit[0],
           vessel_profile_id: vesselProfileId,
+          custom_vessel: effectiveCustomVessel,
         },
       });
       stopRouteProgressPolling();
@@ -812,6 +916,7 @@ export default function MapWorkspace() {
           objective: "shortest_distance_under_safety",
           blocked_sources: blockedSources,
           caution_mode: cautionMode,
+          ais_corridor_enabled: aisCorridorEnabled,
           corridor_bias: corridorBias[0] / 100,
           smoothing: true,
           planner: plannerMode,
@@ -835,6 +940,7 @@ export default function MapWorkspace() {
           dynamic_risk_hard_mode: dynamicRiskHardMode,
           dynamic_risk_switch_min_interval: Math.max(1, dynamicRiskSwitchMinInterval[0]),
           vessel_profile_id: vesselProfileId,
+          custom_vessel: effectiveCustomVessel,
         },
       });
       stopRouteProgressPolling();
@@ -945,6 +1051,7 @@ export default function MapWorkspace() {
           objective: "shortest_distance_under_safety",
           blocked_sources: blockedSources,
           caution_mode: cautionMode,
+          ais_corridor_enabled: aisCorridorEnabled,
           corridor_bias: corridorBias[0] / 100,
           smoothing: true,
           planner: plannerMode,
@@ -963,6 +1070,7 @@ export default function MapWorkspace() {
           dynamic_risk_hard_mode: dynamicRiskHardMode,
           dynamic_risk_switch_min_interval: Math.max(1, dynamicRiskSwitchMinInterval[0]),
           vessel_profile_id: vesselProfileId,
+          custom_vessel: effectiveCustomVessel,
         },
       });
       stopLatestProgressPolling();
@@ -1386,13 +1494,33 @@ export default function MapWorkspace() {
                     </Select>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label>{t("workspace.corridorBias")}</Label>
-                    <div className="flex items-center gap-3">
-                      <Slider value={corridorBias} onValueChange={setCorridorBias} min={0} max={100} step={5} className="flex-1" />
-                      <span className="text-sm text-muted-foreground w-12 text-right">{corridorBias[0] / 100}</span>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                        <div>
+                          <div className="font-medium text-slate-800">AIS 历史走廊偏好</div>
+                            <div className="text-[11px] text-slate-600">默认开启，建议值 0.85。AIS 历史走廊仅作为路径偏好，不作为实时风险。</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={aisCorridorEnabled}
+                          onChange={(e) => setAisCorridorEnabled(e.target.checked)}
+                          className="h-4 w-4"
+                        />
+                      </div>
+                      <Label>{t("workspace.corridorBias")}</Label>
+                      <div className="flex items-center gap-3">
+                        <Slider
+                          value={corridorBias}
+                          onValueChange={setCorridorBias}
+                          min={0}
+                          max={100}
+                          step={5}
+                          className="flex-1"
+                          disabled={!aisCorridorEnabled}
+                        />
+                        <span className="text-sm text-muted-foreground w-12 text-right">{corridorBias[0] / 100}</span>
+                      </div>
                     </div>
-                  </div>
 
                   <div className="space-y-2">
                     <Label>船型预设（北极典型）</Label>
@@ -1401,6 +1529,7 @@ export default function MapWorkspace() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="custom">Custom Vessel</SelectItem>
                         {vesselProfiles.length ? (
                           vesselProfiles.map((item) => (
                             <SelectItem key={item.id} value={item.id}>
@@ -1418,13 +1547,120 @@ export default function MapWorkspace() {
                         if (!current) return null;
                         return (
                           <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700 space-y-1">
+                            <div>Polar Code 类别：{current.polar_category}</div>
                             <div>冰级：{current.ice_class}</div>
                             <div>吃水：{Number(current.draft_m).toFixed(1)} m</div>
                             <div>建议最小水深：{Number(current.min_safe_depth_m).toFixed(1)} m</div>
                             <div>默认风险模式：{current.default_policy?.risk_mode ?? "-"}</div>
+                            <div>冰况阈值：浓度 ≤ {Number(current.default_policy?.max_ice_conc ?? 0).toFixed(2)}，厚度 ≤ {Number(current.default_policy?.max_ice_thickness_m ?? 0).toFixed(2)} m</div>
                           </div>
                         );
                       })()
+                    ) : null}
+                    {vesselProfileId === "custom" ? (
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700 space-y-2">
+                        <div className="font-medium text-slate-800">自定义船舶参数</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="船名"
+                            value={customVessel.name}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, name: e.target.value }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm col-span-2"
+                          />
+                          <input
+                            type="text"
+                            placeholder="冰级"
+                            value={customVessel.ice_class}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, ice_class: e.target.value }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <select
+                            value={customVessel.polar_category}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, polar_category: e.target.value }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          >
+                            <option value="A">Polar Category A</option>
+                            <option value="B">Polar Category B</option>
+                            <option value="C">Polar Category C</option>
+                            <option value="Custom">Custom</option>
+                          </select>
+                          <input
+                            type="number"
+                            step="0.1"
+                            placeholder="吃水 m"
+                            value={customVessel.draft_m}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, draft_m: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <input
+                            type="number"
+                            step="0.1"
+                            placeholder="最小安全水深 m"
+                            value={customVessel.min_safe_depth_m}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, min_safe_depth_m: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <select
+                            value={customVessel.risk_mode}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, risk_mode: e.target.value }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          >
+                            <option value="conservative">conservative</option>
+                            <option value="balanced">balanced</option>
+                            <option value="aggressive">aggressive</option>
+                          </select>
+                          <input
+                            type="number"
+                            step="0.05"
+                            placeholder="风险权重"
+                            value={customVessel.risk_weight_scale}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, risk_weight_scale: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="风险预算"
+                            value={customVessel.risk_budget}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, risk_budget: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="置信水平"
+                            value={customVessel.confidence_level}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, confidence_level: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <input
+                            type="number"
+                            step="0.05"
+                            placeholder="冰风险倍率"
+                            value={customVessel.ice_risk_multiplier}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, ice_risk_multiplier: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="最大冰浓度 0-1"
+                            value={customVessel.max_ice_conc}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, max_ice_conc: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+                          />
+                          <input
+                            type="number"
+                            step="0.1"
+                            placeholder="最大冰厚 m"
+                            value={customVessel.max_ice_thickness_m}
+                            onChange={(e) => setCustomVessel((prev) => ({ ...prev, max_ice_thickness_m: Number(e.target.value) || 0 }))}
+                            className="h-9 rounded-md border border-slate-300 px-2 text-sm col-span-2"
+                          />
+                        </div>
+                        <div className="text-[11px] text-slate-600">自定义参数会同时影响连续风险代价和硬约束边界：最小安全水深、最大冰浓度和最大冰厚会直接收紧可航区域；Polar Code 类别和冰级用于解释这条船的适航边界。</div>
+                      </div>
                     ) : null}
                   </div>
 
@@ -1524,19 +1760,6 @@ export default function MapWorkspace() {
                     <Navigation className="size-4" />
                     {planning ? t("workspace.planRoute.loading") : t("workspace.planRoute")}
                   </Button>
-                  {(planning || routeProgress.visible) && routeProgress.progressId ? (
-                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 space-y-1">
-                      <div className="flex items-center justify-between text-[11px] text-emerald-900">
-                        <span>{routePhaseText}</span>
-                        <span>{Math.max(0, Math.min(100, Math.round(routeProgress.percent)))}%</span>
-                      </div>
-                      <Progress value={Math.max(0, Math.min(100, routeProgress.percent))} />
-                      <div className="text-[11px] text-emerald-900">{routeProgress.message || "进行中..."}</div>
-                      {routeProgress.error ? (
-                        <div className="text-[11px] text-red-600">{routeProgress.error}</div>
-                      ) : null}
-                    </div>
-                  ) : null}
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 space-y-3">
                     <div className="text-sm font-medium text-emerald-900">时序数字孪生回放</div>
                     <div className="space-y-1">
@@ -1675,19 +1898,6 @@ export default function MapWorkspace() {
                     <Button onClick={handlePlanLatestRoute} variant="outline" className="w-full">
                       拉取最新数据并规划
                     </Button>
-                    {(latestPlanning || latestProgress.visible) && latestProgress.progressId ? (
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-2 space-y-1">
-                        <div className="flex items-center justify-between text-[11px] text-slate-600">
-                          <span>{latestPhaseText}</span>
-                          <span>{Math.max(0, Math.min(100, Math.round(latestProgress.percent)))}%</span>
-                        </div>
-                        <Progress value={Math.max(0, Math.min(100, latestProgress.percent))} />
-                        <div className="text-[11px] text-slate-700">{latestProgress.message || "进行中..."}</div>
-                        {latestProgress.error ? (
-                          <div className="text-[11px] text-red-600">{latestProgress.error}</div>
-                        ) : null}
-                      </div>
-                    ) : null}
                   </div>
                   <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
                     <div className="flex items-center justify-between">
@@ -1735,6 +1945,20 @@ export default function MapWorkspace() {
                       保存 Copernicus 配置
                     </Button>
                   </div>
+                  {stormglassConfig ? (
+                    <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-xs text-slate-700 space-y-1">
+                      <div className="font-medium text-cyan-900">Stormglass 实时状态</div>
+                      <div>已配置：{stormglassConfig.configured ? "是" : "否"}</div>
+                      <div>API Key：{stormglassConfig.api_key_set ? "已绑定" : "未绑定"}</div>
+                      <div>采样点阵：{stormglassConfig.sample_lat_count} x {stormglassConfig.sample_lon_count}</div>
+                      <div>数据源偏好：{stormglassConfig.source_preference}</div>
+                      <div>请求超时：{stormglassConfig.request_timeout_sec}s</div>
+                      <div className="text-[11px] text-cyan-900/80 break-all">缓存目录：{stormglassConfig.cache_root}</div>
+                      <div className="pt-1 text-[11px] text-cyan-900/80">
+                        当前接入是配额友好的初版实时流。免费额度较低，若 latest 失败且提示 quota exceeded，优先使用缓存或等待额度刷新。
+                      </div>
+                    </div>
+                  ) : null}
                   <Button
                     onClick={handleRunInference}
                     variant="outline"
@@ -1778,6 +2002,8 @@ export default function MapWorkspace() {
             showRoute={Boolean(activeRouteGeojson)}
             onMapClick={handleMapClick}
             routeGeojson={activeRouteGeojson ?? undefined}
+            secondaryRouteGeojsons={secondaryRouteGeojsons}
+            selectedRouteKey={selectedCandidateId}
             start={mapStart}
             goal={mapGoal}
             replayOverlay={replayOverlay ?? undefined}
@@ -1824,6 +2050,28 @@ export default function MapWorkspace() {
           <div className="p-4 space-y-6">
             <div>
               <h3 className="mb-3">{t("summary.title")}</h3>
+              {activePlanningProgress ? (
+                <div
+                  className={`mb-3 rounded-lg border p-3 space-y-2 ${
+                    activePlanningProgress.tone === "slate"
+                      ? "border-slate-200 bg-slate-50"
+                      : "border-emerald-200 bg-emerald-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium text-slate-900">{activePlanningProgress.title}</div>
+                    <div className="text-xs text-slate-600">{Math.max(0, Math.min(100, Math.round(activePlanningProgress.percent)))}%</div>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-slate-600">
+                    <span>{activePlanningProgress.phaseText}</span>
+                    <span>{activePlanningProgress.message || "进行中..."}</span>
+                  </div>
+                  <Progress value={Math.max(0, Math.min(100, activePlanningProgress.percent))} />
+                  {activePlanningProgress.error ? (
+                    <div className="text-[11px] text-red-600">{activePlanningProgress.error}</div>
+                  ) : null}
+                </div>
+              ) : null}
               {routeResult ? (
                 <div className="space-y-3">
                   {routeCandidates.length ? (
@@ -1838,26 +2086,31 @@ export default function MapWorkspace() {
                               type="button"
                               disabled={c.status !== "ok"}
                               onClick={() => c.status === "ok" && setSelectedCandidateId(c.id)}
-                              className={`w-full rounded-md border px-2 py-2 text-left text-xs transition ${
-                                isActive ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"
+                              className={`w-full rounded-md border px-2 py-2 text-left text-xs transition-all duration-200 ${
+                                isActive
+                                  ? "border-blue-600 bg-blue-50 ring-2 ring-blue-200 shadow-sm"
+                                  : "border-slate-200 bg-white hover:border-slate-300"
                               } ${c.status !== "ok" ? "opacity-60 cursor-not-allowed" : ""}`}
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <span className="font-medium">{c.label}</span>
-                                <span>{c.status === "ok" ? `Pareto#${c.pareto_rank ?? "-"}` : "failed"}</span>
+                                <span className={`font-medium ${isActive ? "text-blue-800" : ""}`}>{c.label}</span>
+                                <span className={isActive ? "font-semibold text-blue-700" : ""}>
+                                  {c.status === "ok" ? `Pareto#${c.pareto_rank ?? "-"}` : "failed"}
+                                </span>
                               </div>
                               {c.status === "ok" ? (
-                                <div className="mt-1 space-y-1 text-slate-700">
+                                <div className={`mt-1 space-y-1 ${isActive ? "text-blue-900" : "text-slate-700"}`}>
                                   <div className="grid grid-cols-2 gap-1">
                                     <div>d={Number(c.distance_km ?? 0).toFixed(2)} km</div>
                                     <div>risk={Number(c.risk_exposure ?? 0).toFixed(3)}</div>
                                     <div>caution={Number(c.caution_len_km ?? 0).toFixed(2)} km</div>
                                     <div>corridor={Number(c.corridor_score ?? 0).toFixed(3)}</div>
                                   </div>
-                                  <div className="text-[11px] text-slate-500">
+                                  <div className={`text-[11px] ${isActive ? "text-blue-700" : "text-slate-500"}`}>
                                     overlap={Number(c.route_overlap_to_selected ?? 0).toFixed(2)} / distinct=
                                     {c.route_distinct ? "yes" : "no"}
                                   </div>
+                                  {isActive ? <div className="font-medium text-blue-700">当前查看中</div> : null}
                                 </div>
                               ) : (
                                 <div className="mt-1 text-red-600">{c.error ?? "candidate failed"}</div>

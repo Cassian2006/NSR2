@@ -35,6 +35,39 @@ def _plan_progress_cb(progress_id: str):
     return _callback
 
 
+def _scientific_rule_summary(*, effective_policy: dict, vessel_profile: dict) -> dict:
+    min_safe_depth = effective_policy.get("min_safe_depth_m")
+    max_ice_conc = effective_policy.get("max_ice_conc")
+    max_ice_thickness_m = effective_policy.get("max_ice_thickness_m")
+    return {
+        "risk_representation": {
+            "primary": "continuous_risk_field",
+            "auxiliary": ["unet_zones_outline", "ais_history_display"],
+            "hard_constraints": [
+                "bathymetry_blocked",
+                "shallow_water_threshold",
+                "ice_concentration_threshold",
+                "ice_thickness_threshold",
+            ],
+        },
+        "ais_role": {
+            "in_risk_field": False,
+            "corridor_preference_enabled": bool(effective_policy.get("ais_corridor_enabled", False)),
+            "note": "AIS is treated as historical corridor preference only, not as safety truth.",
+        },
+        "vessel_constraints": {
+            "profile_id": vessel_profile.get("id"),
+            "polar_category": vessel_profile.get("polar_category"),
+            "ice_class": vessel_profile.get("ice_class"),
+            "draft_m": vessel_profile.get("draft_m"),
+            "min_safe_depth_m": float(min_safe_depth) if min_safe_depth is not None else None,
+            "max_ice_conc": float(max_ice_conc) if max_ice_conc is not None else None,
+            "max_ice_thickness_m": float(max_ice_thickness_m) if max_ice_thickness_m is not None else None,
+            "ice_risk_multiplier": float(effective_policy.get("ice_risk_multiplier", 1.0)),
+        },
+    }
+
+
 def _run_single_route_plan(
     *,
     settings,
@@ -51,8 +84,13 @@ def _run_single_route_plan(
         start=start,
         goal=goal,
         model_version="unet_v1",
+        ais_corridor_enabled=bool(policy.get("ais_corridor_enabled", False)),
         corridor_bias=float(policy["corridor_bias"]),
         caution_mode=str(policy["caution_mode"]),
+        min_safe_depth_m=float(policy.get("min_safe_depth_m")) if policy.get("min_safe_depth_m") is not None else None,
+        ice_risk_multiplier=float(policy.get("ice_risk_multiplier", 1.0)),
+        max_ice_conc=float(policy.get("max_ice_conc")) if policy.get("max_ice_conc") is not None else None,
+        max_ice_thickness_m=float(policy.get("max_ice_thickness_m")) if policy.get("max_ice_thickness_m") is not None else None,
         smoothing=bool(policy["smoothing"]),
         blocked_sources=list(policy["blocked_sources"]),
         planner=str(policy["planner"]),
@@ -176,6 +214,7 @@ def _candidate_record(
             "planner": policy.get("planner"),
             "risk_mode": policy.get("risk_mode"),
             "caution_mode": policy.get("caution_mode"),
+            "ais_corridor_enabled": bool(policy.get("ais_corridor_enabled", False)),
             "corridor_bias": float(policy.get("corridor_bias", 0.2)),
             "vessel_profile_id": policy.get("vessel_profile_id"),
         },
@@ -455,6 +494,10 @@ def plan_route(payload: RoutePlanRequest) -> dict:
     explain["vessel_profile_adjustments"] = vessel_adjustments
     explain["policy_requested"] = requested_policy
     explain["policy_effective"] = policy_data
+    explain["scientific_rules_applied"] = _scientific_rule_summary(
+        effective_policy=policy_data,
+        vessel_profile=vessel_profile,
+    )
     if pareto_summary is not None:
         explain["pareto_summary"] = pareto_summary
 
@@ -535,6 +578,7 @@ def plan_route(payload: RoutePlanRequest) -> dict:
             "goal": payload.goal.model_dump(),
             "distance_km": explain["distance_km"],
             "caution_len_km": explain["caution_len_km"],
+            "ais_corridor_enabled": bool(policy_data.get("ais_corridor_enabled", False)),
             "corridor_bias": float(policy_data.get("corridor_bias", payload.policy.corridor_bias)),
             "model_version": "unet_v1",
             "dataset_version": version_snapshot["dataset_version"],
@@ -597,8 +641,13 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
             start=(payload.start.lat, payload.start.lon),
             goal=(payload.goal.lat, payload.goal.lon),
             model_version="unet_v1",
+            ais_corridor_enabled=bool(policy_data.get("ais_corridor_enabled", False)),
             corridor_bias=float(policy_data["corridor_bias"]),
             caution_mode=str(policy_data["caution_mode"]),
+            min_safe_depth_m=float(policy_data.get("min_safe_depth_m")) if policy_data.get("min_safe_depth_m") is not None else None,
+            ice_risk_multiplier=float(policy_data.get("ice_risk_multiplier", 1.0)),
+            max_ice_conc=float(policy_data.get("max_ice_conc")) if policy_data.get("max_ice_conc") is not None else None,
+            max_ice_thickness_m=float(policy_data.get("max_ice_thickness_m")) if policy_data.get("max_ice_thickness_m") is not None else None,
             smoothing=bool(policy_data["smoothing"]),
             blocked_sources=list(policy_data["blocked_sources"]),
             planner=str(policy_data["planner"]),
@@ -632,6 +681,10 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
     result.explain["vessel_profile_adjustments"] = vessel_adjustments
     result.explain["policy_requested"] = requested_policy
     result.explain["policy_effective"] = policy_data
+    result.explain["scientific_rules_applied"] = _scientific_rule_summary(
+        effective_policy=policy_data,
+        vessel_profile=vessel_profile,
+    )
 
     route_coords = result.route_geojson.get("geometry", {}).get("coordinates", [])
     try:
@@ -724,6 +777,7 @@ def plan_route_dynamic(payload: DynamicRoutePlanRequest) -> dict:
             "goal": payload.goal.model_dump(),
             "distance_km": result.explain["distance_km"],
             "caution_len_km": result.explain["caution_len_km"],
+            "ais_corridor_enabled": bool(policy_data.get("ais_corridor_enabled", False)),
             "corridor_bias": float(policy_data.get("corridor_bias", payload.policy.corridor_bias)),
             "model_version": "unet_v1",
             "dataset_version": version_snapshot["dataset_version"],

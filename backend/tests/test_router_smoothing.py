@@ -9,6 +9,8 @@ from app.planning.router import (
     _max_turn_angle_deg,
     _smooth_cells_los,
     _smooth_cells_with_marine_turns,
+    _transition_cost,
+    _transition_cost_segment,
     _turn_penalty_km,
 )
 
@@ -79,6 +81,19 @@ def test_display_coordinates_are_smoothed_for_rendering() -> None:
     assert out[-1] == base[-1]
 
 
+def test_frontend_should_prefer_feasible_coordinates_over_display_coordinates() -> None:
+    feature = {
+        "geometry": {"coordinates": [[0.0, 0.0], [1.0, 1.0]]},
+        "properties": {
+            "display_coordinates": [[0.0, 0.0], [0.5, 2.0], [1.0, 1.0]],
+            "feasible_smoothed_coordinates": [[0.0, 0.0], [1.0, 1.0]],
+            "raw_coordinates": [[0.0, 0.0], [1.0, 1.0]],
+        },
+    }
+    coords = feature["properties"]["feasible_smoothed_coordinates"] or feature["properties"]["raw_coordinates"] or feature["geometry"]["coordinates"]
+    assert coords == [[0.0, 0.0], [1.0, 1.0]]
+
+
 def test_turn_penalty_is_positive_for_sharp_turn() -> None:
     penalty = _turn_penalty_km((0, 0), (0, 1), (1, 1), step_km=10.0, weight=0.03)
     assert penalty > 0.0
@@ -91,3 +106,154 @@ def test_marine_turn_smoothing_limits_max_turn() -> None:
     assert smoothed[0] == path[0]
     assert smoothed[-1] == path[-1]
     assert _max_turn_angle_deg(smoothed) <= 105.0 + 1e-6
+
+
+def test_transition_cost_prefers_high_ais_corridor_even_near_blocked() -> None:
+    geo = _GeoStub()
+    caution = np.zeros((3, 3), dtype=bool)
+    ais = np.zeros((3, 3), dtype=np.float32)
+    near = np.zeros((3, 3), dtype=bool)
+    near[0, 1] = True
+    ais[0, 1] = 0.95
+
+    coastal = _transition_cost_segment(
+        from_rc=(0, 0),
+        to_rc=(0, 1),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.28,
+        near_blocked=near,
+        near_blocked_penalty=0.06,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+    )
+    open_sea = _transition_cost_segment(
+        from_rc=(1, 0),
+        to_rc=(1, 1),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.28,
+        near_blocked=np.zeros((3, 3), dtype=bool),
+        near_blocked_penalty=0.06,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+    )
+    assert coastal < open_sea
+
+
+def test_transition_cost_prefers_high_ais_corridor_on_single_step() -> None:
+    geo = _GeoStub()
+    caution = np.zeros((3, 3), dtype=bool)
+    ais = np.zeros((3, 3), dtype=np.float32)
+    near = np.zeros((3, 3), dtype=bool)
+    near[0, 1] = True
+    ais[0, 1] = 0.95
+
+    coastal = _transition_cost(
+        from_rc=(0, 0),
+        to_rc=(0, 1),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.28,
+        near_blocked=near,
+        near_blocked_penalty=0.06,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+    )
+    open_sea = _transition_cost(
+        from_rc=(1, 0),
+        to_rc=(1, 1),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.28,
+        near_blocked=np.zeros((3, 3), dtype=bool),
+        near_blocked_penalty=0.06,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+    )
+    assert coastal < open_sea
+
+
+def test_transition_cost_penalizes_detour_away_from_ais_corridor() -> None:
+    geo = _GeoStub()
+    caution = np.zeros((3, 3), dtype=bool)
+    ais = np.zeros((3, 3), dtype=np.float32)
+    ais[1, 1] = 0.9
+
+    on_corridor = _transition_cost(
+        from_rc=(1, 0),
+        to_rc=(1, 1),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.3,
+        near_blocked=None,
+        near_blocked_penalty=0.0,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+    )
+    off_corridor = _transition_cost(
+        from_rc=(2, 0),
+        to_rc=(2, 1),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.3,
+        near_blocked=None,
+        near_blocked_penalty=0.0,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+    )
+    assert on_corridor < off_corridor
+
+
+def test_transition_cost_weakens_corridor_pull_near_route_endpoints() -> None:
+    geo = _GeoStub()
+    caution = np.zeros((3, 12), dtype=bool)
+    ais = np.zeros((3, 12), dtype=np.float32)
+    ais[1, 1] = 0.95
+    ais[1, 6] = 0.95
+
+    near_start = _transition_cost(
+        from_rc=(1, 0),
+        to_rc=(1, 1),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.8,
+        near_blocked=None,
+        near_blocked_penalty=0.0,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+        start_rc=(1, 0),
+        goal_rc=(1, 11),
+        corridor_taper_km=500.0,
+    )
+    mid_route = _transition_cost(
+        from_rc=(1, 5),
+        to_rc=(1, 6),
+        geo=geo,
+        caution=caution,
+        ais_norm=ais,
+        caution_penalty=0.22,
+        corridor_reward=0.8,
+        near_blocked=None,
+        near_blocked_penalty=0.0,
+        uncertainty_penalty=None,
+        risk_penalty=None,
+        start_rc=(1, 0),
+        goal_rc=(1, 11),
+        corridor_taper_km=500.0,
+    )
+    assert near_start > mid_route

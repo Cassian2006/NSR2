@@ -20,6 +20,7 @@ export default function Layout() {
   const isScenario = location.pathname === "/";
   const isWorkspace = location.pathname.startsWith("/workspace");
   const isAnnotation = location.pathname.startsWith("/annotation");
+  const isScience = location.pathname.startsWith("/science");
   const isExport = location.pathname.startsWith("/export");
 
   return (
@@ -61,6 +62,15 @@ export default function Layout() {
                 className={isAnnotation ? "bg-amber-600 text-white hover:bg-amber-700 hover:text-white" : ""}
               >
                 {t("nav.annotation")}
+              </Button>
+            </Link>
+            <Link to="/science">
+              <Button
+                variant="ghost"
+                size="sm"
+                className={isScience ? "bg-slate-700 text-white hover:bg-slate-800 hover:text-white" : ""}
+              >
+                {t("nav.science")}
               </Button>
             </Link>
             <Link to="/export">

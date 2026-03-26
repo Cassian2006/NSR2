@@ -472,6 +472,16 @@ def test_copernicus_config_endpoints(client: TestClient) -> None:
     assert "has_latest_meta" in st
 
 
+def test_stormglass_config_endpoint(client: TestClient) -> None:
+    resp = client.get("/v1/latest/stormglass/config")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "configured" in payload
+    assert "api_key_set" in payload
+    assert "sample_lat_count" in payload
+    assert "sample_lon_count" in payload
+
+
 def test_route_plan_is_stable_and_stays_out_of_blocked(client: TestClient) -> None:
     ts_ui = _pick_timestamp(client)
     ts = normalize_timestamp(ts_ui)

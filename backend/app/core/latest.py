@@ -23,6 +23,7 @@ from app.core.source_metadata import (
     ensure_required_source_metadata,
     timestamp_to_valid_time,
 )
+from app.core.stormglass_live import StormglassLiveError, is_stormglass_configured, pull_latest_env_partial as pull_stormglass_env_partial
 
 
 TIMESTAMP_FMT = "%Y-%m-%d_%H"
@@ -37,6 +38,7 @@ DEFAULT_CHANNELS = [
     "bathy",
     "ais_heatmap",
 ]
+STORMGLASS_SOURCE = "stormglass_live"
 COPERNICUS_SOURCE = "copernicus_live"
 SNAPSHOT_SOURCE = "remote_snapshot"
 
@@ -454,6 +456,102 @@ def _materialize_from_copernicus(
     return source_meta
 
 
+def _materialize_from_stormglass(
+    *,
+    settings: Settings,
+    timestamp: str,
+    template_timestamp: str | None = None,
+    progress_cb: ProgressCB | None = None,
+) -> dict:
+    if not is_stormglass_configured(settings):
+        raise LatestDataError("Stormglass API key is not configured")
+
+    base_timestamp = template_timestamp if template_timestamp and _is_materialized(settings, template_timestamp) else _nearest_local_timestamp(settings, timestamp)
+    _emit_progress(progress_cb, "prepare", f"Using template grid {base_timestamp}", 10)
+    base_dir = settings.annotation_pack_root / base_timestamp
+    x_base_path = base_dir / "x_stack.npy"
+    blocked_path = base_dir / "blocked_mask.npy"
+    if not x_base_path.exists() or not blocked_path.exists():
+        raise LatestDataError(f"Base template timestamp missing arrays: {base_timestamp}")
+
+    base_stack = np.load(x_base_path).astype(np.float32)
+    blocked_mask = np.load(blocked_path).astype(np.uint8)
+    if base_stack.ndim != 3 or blocked_mask.ndim != 2 or base_stack.shape[1:] != blocked_mask.shape:
+        raise LatestDataError(f"Base template shape mismatch at {base_timestamp}")
+
+    channel_names = _load_channel_names(base_dir, channels_count=int(base_stack.shape[0]))
+    geo = load_grid_geo(settings=settings, timestamp=base_timestamp, shape=blocked_mask.shape)
+    target_time = datetime.strptime(timestamp, TIMESTAMP_FMT)
+    _emit_progress(progress_cb, "download", "Pulling Stormglass grids", 20)
+
+    def _pull():
+        return pull_stormglass_env_partial(
+            settings=settings,
+            target_time=target_time,
+            target_lats=geo.lat_axis.astype(np.float64),
+            target_lons=geo.lon_axis.astype(np.float64),
+            progress_cb=progress_cb,
+        )
+
+    try:
+        pulled = _with_retries(
+            run=_pull,
+            retries=settings.latest_remote_retries,
+            backoff_sec=settings.latest_remote_retry_backoff_sec,
+            label="stormglass pull",
+            progress_cb=progress_cb,
+            phase="download",
+            base_percent=24,
+        )
+    except StormglassLiveError as exc:
+        raise LatestDataError(str(exc)) from exc
+    except LatestDataError as exc:
+        raise LatestDataError(str(exc)) from exc
+
+    out_stack = base_stack.copy()
+    for idx, ch in enumerate(channel_names):
+        field = pulled.fields.get(ch)
+        if field is not None and field.shape == blocked_mask.shape:
+            out_stack[idx] = np.nan_to_num(field, nan=0.0, posinf=0.0, neginf=0.0)
+    _emit_progress(progress_cb, "merge", "Merging Stormglass channels into model input", 82)
+
+    source_meta = build_source_metadata(
+        source=STORMGLASS_SOURCE,
+        product_id="stormglass_weather_point",
+        valid_time=timestamp_to_valid_time(timestamp),
+        extra={
+            "materialized_at": _utc_now_iso(),
+            "requested_timestamp": timestamp,
+            "template_timestamp": base_timestamp,
+            "variables": {
+                "wave_var": "waveHeight",
+                "wind_speed_var": "windSpeed",
+                "wind_direction_var": "windDirection",
+            },
+            "sample_grid": {
+                "lat_count": int(settings.stormglass_sample_lat_count),
+                "lon_count": int(settings.stormglass_sample_lon_count),
+            },
+            "channel_source": pulled.channel_source,
+            "pulled_channels": sorted(list(pulled.fields.keys())),
+            "notes": pulled.notes,
+            "stats": pulled.stats,
+        },
+    )
+    _save_annotation_pack(
+        settings=settings,
+        timestamp=timestamp,
+        x_stack=out_stack,
+        blocked_mask=blocked_mask,
+        channel_names=channel_names,
+        source_meta=source_meta,
+        target_lat=geo.lat_axis.astype(np.float64),
+        target_lon=geo.lon_axis.astype(np.float64),
+    )
+    _emit_progress(progress_cb, "materialize", "Latest data materialized", 92)
+    return source_meta
+
+
 def resolve_latest_timestamp(
     *,
     settings: Settings,
@@ -472,7 +570,31 @@ def resolve_latest_timestamp(
             return LatestResolveResult(timestamp=timestamp, source="local_existing", note="already materialized")
 
         copernicus_error: str | None = None
+        stormglass_error: str | None = None
         snapshot_error: str | None = None
+        if is_stormglass_configured(settings):
+            can_use_stormglass, reason = can_attempt_source(STORMGLASS_SOURCE)
+            if can_use_stormglass:
+                try:
+                    source_meta = _materialize_from_stormglass(
+                        settings=settings,
+                        timestamp=timestamp,
+                        template_timestamp=timestamp if has_existing_target else None,
+                        progress_cb=progress_cb,
+                    )
+                    record_source_success(STORMGLASS_SOURCE)
+                    _emit_progress(progress_cb, "resolve", "Stormglass pull completed", 94)
+                    return LatestResolveResult(
+                        timestamp=timestamp,
+                        source=STORMGLASS_SOURCE,
+                        note=f"materialized from Stormglass ({source_meta.get('materialized_at', '')})",
+                    )
+                except LatestDataError as exc:
+                    stormglass_error = str(exc)
+                    record_source_failure(STORMGLASS_SOURCE, stormglass_error)
+            else:
+                stormglass_error = f"skipped_by_health_guard:{reason}"
+
         if is_copernicus_configured(settings):
             can_use_copernicus, reason = can_attempt_source(COPERNICUS_SOURCE)
             if can_use_copernicus:
@@ -516,6 +638,8 @@ def resolve_latest_timestamp(
         if has_existing_target:
             _emit_progress(progress_cb, "resolve", "Refresh failed, falling back to stale local snapshot", 94)
             notes: list[str] = []
+            if stormglass_error:
+                notes.append(f"stormglass_error={stormglass_error}")
             if copernicus_error:
                 notes.append(f"copernicus_error={copernicus_error}")
             if snapshot_error:
@@ -531,6 +655,8 @@ def resolve_latest_timestamp(
         _emit_progress(progress_cb, "resolve", f"Fallback to nearest local timestamp: {fallback}", 94)
 
         notes: list[str] = []
+        if stormglass_error:
+            notes.append(f"stormglass_error={stormglass_error}")
         if copernicus_error:
             notes.append(f"copernicus_error={copernicus_error}")
         if snapshot_error:

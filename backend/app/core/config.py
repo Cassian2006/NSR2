@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     copernicus_wind_u_var: str = "vxo"
     copernicus_wind_v_var: str = "vyo"
     copernicus_request_timeout_sec: int = 180
+    stormglass_api_key: str = ""
+    stormglass_source_preference: str = "sg"
+    stormglass_sample_lat_count: int = 2
+    stormglass_sample_lon_count: int = 2
+    stormglass_request_timeout_sec: int = 30
+    stormglass_cache_root: Path = latest_root / "stormglass"
     cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:5174,http://127.0.0.1:5174,"
@@ -146,6 +152,8 @@ def get_settings() -> Settings:
         settings.latest_progress_store_path = settings.latest_root / "progress_state.json"
     if "latest_source_health_path" not in provided:
         settings.latest_source_health_path = settings.latest_root / "source_health.json"
+    if "stormglass_cache_root" not in provided:
+        settings.stormglass_cache_root = settings.latest_root / "stormglass"
     if "unet_default_summary" not in provided:
         settings.unet_default_summary = settings.outputs_root / "train_runs" / "unet_cycle_full_v1" / "summary.json"
 
@@ -168,6 +176,7 @@ def get_settings() -> Settings:
 
     settings.outputs_root.mkdir(parents=True, exist_ok=True)
     settings.latest_root.mkdir(parents=True, exist_ok=True)
+    settings.stormglass_cache_root.mkdir(parents=True, exist_ok=True)
     settings.dynamic_state_root.mkdir(parents=True, exist_ok=True)
     settings.gallery_root.mkdir(parents=True, exist_ok=True)
     (settings.gallery_root / "runs").mkdir(parents=True, exist_ok=True)

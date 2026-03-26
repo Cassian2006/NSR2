@@ -14,12 +14,46 @@ from app.core.latest_source_health import get_source_health_snapshot
 from app.core.latest_slo import build_latest_slo_snapshot
 from app.core.run_snapshot import save_run_snapshot
 from app.core.schemas import CopernicusConfigRequest, LatestPlanRequest
+from app.core.stormglass_live import is_stormglass_configured
 from app.core.vessel_profiles import apply_vessel_profile_to_policy
 from app.core.versioning import build_version_snapshot
 from app.planning.router import PlanningError, plan_grid_route, plan_grid_route_dynamic
 
 
 router = APIRouter(tags=["latest"])
+
+
+def _scientific_rule_summary(*, effective_policy: dict, vessel_profile: dict) -> dict:
+    min_safe_depth = effective_policy.get("min_safe_depth_m")
+    max_ice_conc = effective_policy.get("max_ice_conc")
+    max_ice_thickness_m = effective_policy.get("max_ice_thickness_m")
+    return {
+        "risk_representation": {
+            "primary": "continuous_risk_field",
+            "auxiliary": ["unet_zones_outline", "ais_history_display"],
+            "hard_constraints": [
+                "bathymetry_blocked",
+                "shallow_water_threshold",
+                "ice_concentration_threshold",
+                "ice_thickness_threshold",
+            ],
+        },
+        "ais_role": {
+            "in_risk_field": False,
+            "corridor_preference_enabled": bool(effective_policy.get("ais_corridor_enabled", False)),
+            "note": "AIS is treated as historical corridor preference only, not as safety truth.",
+        },
+        "vessel_constraints": {
+            "profile_id": vessel_profile.get("id"),
+            "polar_category": vessel_profile.get("polar_category"),
+            "ice_class": vessel_profile.get("ice_class"),
+            "draft_m": vessel_profile.get("draft_m"),
+            "min_safe_depth_m": float(min_safe_depth) if min_safe_depth is not None else None,
+            "max_ice_conc": float(max_ice_conc) if max_ice_conc is not None else None,
+            "max_ice_thickness_m": float(max_ice_thickness_m) if max_ice_thickness_m is not None else None,
+            "ice_risk_multiplier": float(effective_policy.get("ice_risk_multiplier", 1.0)),
+        },
+    }
 
 
 def _build_dynamic_timestamps(*, anchor_timestamp: str, all_timestamps: list[str], window: int) -> list[str]:
@@ -68,8 +102,13 @@ def _plan_latest_static_with_fallback(
             start=start,
             goal=goal,
             model_version="unet_v1",
+            ais_corridor_enabled=bool(policy.get("ais_corridor_enabled", False)),
             corridor_bias=policy["corridor_bias"],
             caution_mode=policy["caution_mode"],
+            min_safe_depth_m=float(policy.get("min_safe_depth_m")) if policy.get("min_safe_depth_m") is not None else None,
+            ice_risk_multiplier=float(policy.get("ice_risk_multiplier", 1.0)),
+            max_ice_conc=float(policy.get("max_ice_conc")) if policy.get("max_ice_conc") is not None else None,
+            max_ice_thickness_m=float(policy.get("max_ice_thickness_m")) if policy.get("max_ice_thickness_m") is not None else None,
             smoothing=policy["smoothing"],
             blocked_sources=policy["blocked_sources"],
             planner=policy["planner"],
@@ -92,8 +131,13 @@ def _plan_latest_static_with_fallback(
             start=start,
             goal=goal,
             model_version="unet_v1",
+            ais_corridor_enabled=bool(policy.get("ais_corridor_enabled", False)),
             corridor_bias=policy["corridor_bias"],
             caution_mode=policy["caution_mode"],
+            min_safe_depth_m=float(policy.get("min_safe_depth_m")) if policy.get("min_safe_depth_m") is not None else None,
+            ice_risk_multiplier=float(policy.get("ice_risk_multiplier", 1.0)),
+            max_ice_conc=float(policy.get("max_ice_conc")) if policy.get("max_ice_conc") is not None else None,
+            max_ice_thickness_m=float(policy.get("max_ice_thickness_m")) if policy.get("max_ice_thickness_m") is not None else None,
             smoothing=policy["smoothing"],
             blocked_sources=["bathy"],
             planner=policy["planner"],
@@ -191,8 +235,13 @@ def plan_latest(payload: LatestPlanRequest) -> dict:
                         start=start_coord,
                         goal=goal_coord,
                         model_version="unet_v1",
+                        ais_corridor_enabled=bool(effective_policy.get("ais_corridor_enabled", False)),
                         corridor_bias=float(effective_policy["corridor_bias"]),
                         caution_mode=str(effective_policy["caution_mode"]),
+                        min_safe_depth_m=float(effective_policy.get("min_safe_depth_m")) if effective_policy.get("min_safe_depth_m") is not None else None,
+                        ice_risk_multiplier=float(effective_policy.get("ice_risk_multiplier", 1.0)),
+                        max_ice_conc=float(effective_policy.get("max_ice_conc")) if effective_policy.get("max_ice_conc") is not None else None,
+                        max_ice_thickness_m=float(effective_policy.get("max_ice_thickness_m")) if effective_policy.get("max_ice_thickness_m") is not None else None,
                         smoothing=bool(effective_policy["smoothing"]),
                         blocked_sources=list(effective_policy["blocked_sources"]),
                         planner=str(effective_policy["planner"]),
@@ -245,6 +294,10 @@ def plan_latest(payload: LatestPlanRequest) -> dict:
         explain["vessel_profile_adjustments"] = vessel_adjustments
         explain["policy_requested"] = requested_policy
         explain["policy_effective"] = effective_policy
+        explain["scientific_rules_applied"] = _scientific_rule_summary(
+            effective_policy=effective_policy,
+            vessel_profile=vessel_profile,
+        )
         if fallback_note:
             explain["planning_fallback"] = fallback_note
         if payload.dynamic_replan_enabled:
@@ -377,6 +430,20 @@ def get_copernicus_config() -> dict:
             "wind_u_var": settings.copernicus_wind_u_var,
             "wind_v_var": settings.copernicus_wind_v_var,
         },
+    }
+
+
+@router.get("/latest/stormglass/config")
+def get_stormglass_config() -> dict:
+    settings = get_settings()
+    return {
+        "configured": is_stormglass_configured(settings),
+        "api_key_set": bool(settings.stormglass_api_key),
+        "source_preference": settings.stormglass_source_preference,
+        "sample_lat_count": int(settings.stormglass_sample_lat_count),
+        "sample_lon_count": int(settings.stormglass_sample_lon_count),
+        "request_timeout_sec": int(settings.stormglass_request_timeout_sec),
+        "cache_root": str(settings.stormglass_cache_root),
     }
 
 

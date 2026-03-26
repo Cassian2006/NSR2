@@ -11,11 +11,28 @@ class Coord(BaseModel):
     lon: float
 
 
+class CustomVesselPolicy(BaseModel):
+    name: str = "Custom Vessel"
+    polar_category: str = "Custom"
+    ice_class: str = "Custom"
+    draft_m: float = Field(default=10.0, ge=0.0, le=50.0)
+    min_safe_depth_m: float = Field(default=12.0, ge=0.0, le=200.0)
+    risk_mode: str = "balanced"
+    risk_weight_scale: float = Field(default=1.0, ge=0.0, le=5.0)
+    risk_budget: float = Field(default=0.8, ge=0.0, le=1.0)
+    confidence_level: float = Field(default=0.9, ge=0.5, le=0.999)
+    corridor_bias_multiplier: float = Field(default=1.0, ge=0.0, le=2.0)
+    ice_risk_multiplier: float = Field(default=1.0, ge=0.0, le=3.0)
+    max_ice_conc: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_ice_thickness_m: float = Field(default=1.0, ge=0.0, le=10.0)
+
+
 class PlanPolicy(BaseModel):
     objective: str = "shortest_distance_under_safety"
     blocked_sources: list[str] = Field(default_factory=lambda: ["bathy", "unet_blocked"])
     caution_mode: str = "tie_breaker"
-    corridor_bias: float = 0.2
+    ais_corridor_enabled: bool = True
+    corridor_bias: float = 0.85
     smoothing: bool = True
     planner: str = "astar"
     risk_mode: str = "balanced"
@@ -40,6 +57,7 @@ class PlanPolicy(BaseModel):
     dynamic_risk_hard_mode: str = "conservative"
     dynamic_risk_switch_min_interval: int = Field(default=1, ge=1, le=500)
     vessel_profile_id: str = "arc7_lng"
+    custom_vessel: CustomVesselPolicy | None = None
 
 
 class RoutePlanRequest(BaseModel):

@@ -395,9 +395,19 @@ def _build_near_blocked_mask(blocked: np.ndarray) -> np.ndarray:
 def _load_ais_heatmap(settings: Settings, timestamp: str, shape: tuple[int, int]) -> np.ndarray:
     root = settings.ais_heatmap_root
     if root.exists():
-        hits = list(root.rglob(f"{timestamp}.npy"))
-        if hits:
-            arr = np.load(hits[0]).astype(np.float32)
+        preferred = [
+            root / "demo_v1" / f"{timestamp}.npy",
+            root / "7d" / f"{timestamp}.npy",
+            root / f"{timestamp}.npy",
+        ]
+        for candidate in preferred:
+            if candidate.exists():
+                arr = np.load(candidate).astype(np.float32)
+                if arr.shape == shape:
+                    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+        hits = sorted(root.rglob(f"{timestamp}.npy"), key=lambda p: str(p))
+        for hit in hits:
+            arr = np.load(hit).astype(np.float32)
             if arr.shape == shape:
                 return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
     return np.zeros(shape, dtype=np.float32)
@@ -662,25 +672,53 @@ def _dynamic_risk_stage_and_target_mode(
     return "normal", mode_base, usage
 
 
-def _policy_scalars(caution_mode: str, corridor_bias: float) -> tuple[float, float, float]:
+def _policy_scalars(caution_mode: str, corridor_bias: float, ais_corridor_enabled: bool) -> tuple[float, float, float]:
     if caution_mode == "tie_breaker":
         caution_penalty = 0.22
-        corridor_reward_scale = 0.10
+        corridor_reward_scale = 0.95
         near_blocked_penalty = 0.06
     elif caution_mode == "budget":
         caution_penalty = 0.35
-        corridor_reward_scale = 0.06
+        corridor_reward_scale = 0.75
         near_blocked_penalty = 0.08
     elif caution_mode == "minimize":
         caution_penalty = 0.55
-        corridor_reward_scale = 0.03
+        corridor_reward_scale = 0.55
         near_blocked_penalty = 0.10
     else:  # strict
         caution_penalty = 0.0
         corridor_reward_scale = 0.0
         near_blocked_penalty = 0.0
-    corridor_reward = max(0.0, float(corridor_bias)) * corridor_reward_scale
+    corridor_reward = max(0.0, float(corridor_bias)) * corridor_reward_scale if ais_corridor_enabled else 0.0
     return caution_penalty, corridor_reward, near_blocked_penalty
+
+
+def _corridor_locality_factor(
+    *,
+    geo,
+    to_rc: tuple[int, int],
+    start_rc: tuple[int, int] | None = None,
+    goal_rc: tuple[int, int] | None = None,
+    taper_km: float = 350.0,
+) -> float:
+    if start_rc is None and goal_rc is None:
+        return 1.0
+    tr, tc = to_rc
+    lat, lon = geo.rc_to_latlon(tr, tc)
+    dists: list[float] = []
+    if start_rc is not None:
+        slat, slon = geo.rc_to_latlon(*start_rc)
+        dists.append(haversine_km(lat, lon, slat, slon))
+    if goal_rc is not None:
+        glat, glon = geo.rc_to_latlon(*goal_rc)
+        dists.append(haversine_km(lat, lon, glat, glon))
+    if not dists:
+        return 1.0
+    min_dist = min(dists)
+    if taper_km <= 1e-6:
+        return 1.0
+    ratio = float(np.clip(min_dist / taper_km, 0.0, 1.0))
+    return ratio * ratio
 
 
 def _grid_resolution_km(bounds: GridBounds, h: int, w: int) -> tuple[float, float]:
@@ -698,6 +736,10 @@ def _load_grid_state(
     model_version: str,
     blocked_sources: list[str],
     caution_mode: str,
+    min_safe_depth_m: float | None = None,
+    ice_risk_multiplier: float = 1.0,
+    max_ice_conc: float | None = None,
+    max_ice_thickness_m: float | None = None,
     uncertainty_uplift: bool = True,
     uncertainty_uplift_scale: float = 1.0,
     risk_mode: str = "balanced",
@@ -726,6 +768,24 @@ def _load_grid_state(
         raise PlanningError(f"Pred shape mismatch for timestamp={timestamp}: {unet_pred.shape} vs {(h, w)}")
 
     blocked = blocked_bathy.copy()
+    if min_safe_depth_m is not None:
+        ann_dir = settings.annotation_pack_root / timestamp
+        x_stack_path = ann_dir / "x_stack.npy"
+        meta_path = ann_dir / "meta.json"
+        if x_stack_path.exists() and meta_path.exists():
+            try:
+                import json
+
+                x_stack = np.load(x_stack_path).astype(np.float32)
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                channel_names = meta.get("channel_names", [])
+                if isinstance(channel_names, list) and "bathy" in channel_names:
+                    bathy_idx = channel_names.index("bathy")
+                    bathy = x_stack[bathy_idx]
+                    shallow_mask = bathy > (-float(min_safe_depth_m))
+                    blocked |= shallow_mask
+            except Exception:
+                pass
     if "unet_blocked" in blocked_sources:
         blocked |= unet_pred == 2
     if "unet_caution" in blocked_sources or caution_mode == "strict":
@@ -818,22 +878,37 @@ def _transition_cost(
     near_blocked_penalty: float = 0.0,
     uncertainty_penalty: np.ndarray | None = None,
     risk_penalty: np.ndarray | None = None,
+    start_rc: tuple[int, int] | None = None,
+    goal_rc: tuple[int, int] | None = None,
+    corridor_taper_km: float = 350.0,
 ) -> float:
     fr, fc = from_rc
     tr, tc = to_rc
     lat0, lon0 = geo.rc_to_latlon(fr, fc)
     lat1, lon1 = geo.rc_to_latlon(tr, tc)
     step_km = haversine_km(lat0, lon0, lat1, lon1)
+    corridor_mean = float(ais_norm[tr, tc])
+    locality = _corridor_locality_factor(
+        geo=geo,
+        to_rc=to_rc,
+        start_rc=start_rc,
+        goal_rc=goal_rc,
+        taper_km=corridor_taper_km,
+    )
+    effective_corridor_reward = float(corridor_reward) * locality
+    corridor_pull = corridor_mean * (0.45 + 1.35 * corridor_mean)
+    corridor_detour_penalty = effective_corridor_reward * 4.0 * ((1.0 - corridor_mean) ** 2)
     mult = 1.0
     if caution[tr, tc]:
         mult += caution_penalty
     elif near_blocked is not None and near_blocked[tr, tc]:
-        mult += near_blocked_penalty
+        mult += float(near_blocked_penalty) * max(0.15, 1.0 - 0.85 * corridor_mean)
     if uncertainty_penalty is not None:
         mult += float(uncertainty_penalty[tr, tc])
     if risk_penalty is not None:
         mult += float(risk_penalty[tr, tc])
-    mult -= corridor_reward * float(ais_norm[tr, tc])
+    mult += corridor_detour_penalty
+    mult -= effective_corridor_reward * corridor_pull
     mult = max(0.15, mult)
     return step_km * mult
 
@@ -894,6 +969,9 @@ def _transition_cost_segment(
     near_blocked_penalty: float = 0.0,
     uncertainty_penalty: np.ndarray | None = None,
     risk_penalty: np.ndarray | None = None,
+    start_rc: tuple[int, int] | None = None,
+    goal_rc: tuple[int, int] | None = None,
+    corridor_taper_km: float = 350.0,
 ) -> float:
     fr, fc = from_rc
     tr, tc = to_rc
@@ -909,8 +987,19 @@ def _transition_cost_segment(
         uncertainty_penalty=uncertainty_penalty,
         risk_penalty=risk_penalty,
     )
-    mult = 1.0 + caution_penalty * caution_ratio + near_blocked_penalty * near_ratio + uncertainty_mean + risk_mean
-    mult -= corridor_reward * corridor_mean
+    locality = _corridor_locality_factor(
+        geo=geo,
+        to_rc=to_rc,
+        start_rc=start_rc,
+        goal_rc=goal_rc,
+        taper_km=corridor_taper_km,
+    )
+    effective_corridor_reward = float(corridor_reward) * locality
+    corridor_pull = corridor_mean * (0.45 + 1.35 * corridor_mean)
+    corridor_detour_penalty = effective_corridor_reward * 4.0 * ((1.0 - corridor_mean) ** 2)
+    effective_near_blocked_penalty = float(near_blocked_penalty) * max(0.15, 1.0 - 0.85 * corridor_mean)
+    mult = 1.0 + caution_penalty * caution_ratio + effective_near_blocked_penalty * near_ratio + uncertainty_mean + risk_mean + corridor_detour_penalty
+    mult -= effective_corridor_reward * corridor_pull
     mult = max(0.15, mult)
     return step_km * mult
 
@@ -1148,6 +1237,8 @@ def _run_astar(
                 near_blocked_penalty=near_blocked_penalty,
                 uncertainty_penalty=uncertainty_penalty,
                 risk_penalty=risk_penalty,
+                start_rc=start,
+                goal_rc=goal,
             )
             prev_rc = came_from.get((r, c))
             turn_penalty = _turn_penalty_km(prev_rc, (r, c), (rr, cc), step_km=step_cost, weight=turn_weight)
@@ -1231,6 +1322,8 @@ def _run_theta_star(
                 near_blocked_penalty=near_blocked_penalty,
                 uncertainty_penalty=uncertainty_penalty,
                 risk_penalty=risk_penalty,
+                start_rc=start,
+                goal_rc=goal,
             )
             if par != cur:
                 turn_deg = _turn_angle_deg(par, cur, nxt)
@@ -1249,6 +1342,8 @@ def _run_theta_star(
                     near_blocked_penalty=near_blocked_penalty,
                     uncertainty_penalty=uncertainty_penalty,
                     risk_penalty=risk_penalty,
+                    start_rc=start,
+                    goal_rc=goal,
                 )
                 grand = parent.get(par, par)
                 if grand != par:
@@ -1354,6 +1449,8 @@ def _run_hybrid_astar(
                 near_blocked_penalty=near_blocked_penalty,
                 uncertainty_penalty=uncertainty_penalty,
                 risk_penalty=risk_penalty,
+                start_rc=start,
+                goal_rc=goal,
             )
             turn_penalty = seg * turn_weight * float(diff)
             cand = cur_g + seg + turn_penalty
@@ -1413,6 +1510,7 @@ def _run_dstar_lite_static(
         near_blocked_penalty=near_blocked_penalty,
         uncertainty_penalty=uncertainty_penalty,
         risk_penalty=risk_penalty,
+        start=start,
     )
     h, w = blocked.shape
     gr, gc = goal
@@ -1450,6 +1548,8 @@ def _run_dstar_lite_static(
                 near_blocked_penalty=near_blocked_penalty,
                 uncertainty_penalty=uncertainty_penalty,
                 risk_penalty=risk_penalty,
+                start_rc=start,
+                goal_rc=goal,
             )
             cand = step_cost + tail + _turn_penalty_km(prev_rc, cur, (rr, cc), step_km=step_cost, weight=turn_weight)
             if cand < best_cost:
@@ -1474,6 +1574,7 @@ def _compute_cost_to_goal(
     blocked: np.ndarray,
     caution: np.ndarray,
     ais_norm: np.ndarray,
+    start: tuple[int, int] | None = None,
     goal: tuple[int, int],
     caution_penalty: float,
     corridor_reward: float,
@@ -1509,6 +1610,8 @@ def _compute_cost_to_goal(
                 near_blocked_penalty=near_blocked_penalty,
                 uncertainty_penalty=uncertainty_penalty,
                 risk_penalty=risk_penalty,
+                start_rc=start,
+                goal_rc=goal,
             )
             if cand < g_to_goal[pr, pc]:
                 g_to_goal[pr, pc] = cand
@@ -1569,6 +1672,7 @@ class _DStarLiteIncremental:
             near_blocked_penalty=self.near_blocked_penalty,
             uncertainty_penalty=self.uncertainty_penalty,
             risk_penalty=self.risk_penalty,
+            start=self.start,
         )
         self.g = g_to_goal.copy()
         self.rhs = g_to_goal.copy()
@@ -1641,6 +1745,8 @@ class _DStarLiteIncremental:
             near_blocked_penalty=self.near_blocked_penalty,
             uncertainty_penalty=self.uncertainty_penalty,
             risk_penalty=self.risk_penalty,
+            start_rc=self.start,
+            goal_rc=self.goal,
         )
 
     def _update_vertex(self, u: tuple[int, int]) -> None:
@@ -1835,6 +1941,7 @@ def plan_grid_route_dynamic(
     start: tuple[float, float],
     goal: tuple[float, float],
     model_version: str,
+    ais_corridor_enabled: bool = False,
     corridor_bias: float,
     caution_mode: str,
     smoothing: bool,
@@ -1845,6 +1952,10 @@ def plan_grid_route_dynamic(
     uncertainty_uplift_scale: float = 1.0,
     risk_mode: str = "balanced",
     risk_weight_scale: float = 1.0,
+    min_safe_depth_m: float | None = None,
+    ice_risk_multiplier: float = 1.0,
+    max_ice_conc: float | None = None,
+    max_ice_thickness_m: float | None = None,
     risk_constraint_mode: str = "none",
     risk_budget: float = 1.0,
     confidence_level: float = 0.90,
@@ -1917,6 +2028,10 @@ def plan_grid_route_dynamic(
             model_version=model_version,
             blocked_sources=blocked_sources,
             caution_mode=caution_mode,
+            min_safe_depth_m=min_safe_depth_m,
+            ice_risk_multiplier=ice_risk_multiplier,
+            max_ice_conc=max_ice_conc,
+            max_ice_thickness_m=max_ice_thickness_m,
             uncertainty_uplift=uncertainty_uplift,
             uncertainty_uplift_scale=uncertainty_uplift_scale,
             risk_mode=risk_mode,
@@ -1982,7 +2097,11 @@ def plan_grid_route_dynamic(
             "dstar_lite_recompute, any_angle, hybrid_astar".format(planner=planner)
         )
 
-    caution_penalty, corridor_reward, near_blocked_penalty = _policy_scalars(caution_mode, corridor_bias)
+    caution_penalty, corridor_reward, near_blocked_penalty = _policy_scalars(
+        caution_mode,
+        corridor_bias,
+        ais_corridor_enabled,
+    )
     km_per_row, km_per_col_min = _grid_resolution_km(states[0].bounds, h, w)
 
     sr0, sc0, s_inside = states[0].geo.latlon_to_rc(start[0], start[1])
@@ -2887,11 +3006,16 @@ def plan_grid_route(
     start: tuple[float, float],
     goal: tuple[float, float],
     model_version: str,
+    ais_corridor_enabled: bool = False,
     corridor_bias: float,
     caution_mode: str,
     smoothing: bool,
     blocked_sources: list[str],
     planner: str = "astar",
+    min_safe_depth_m: float | None = None,
+    ice_risk_multiplier: float = 1.0,
+    max_ice_conc: float | None = None,
+    max_ice_thickness_m: float | None = None,
     uncertainty_uplift: bool = True,
     uncertainty_uplift_scale: float = 1.0,
     risk_mode: str = "balanced",
@@ -2937,6 +3061,36 @@ def plan_grid_route(
         raise PlanningError(f"Pred shape mismatch for timestamp={timestamp}: {unet_pred.shape} vs {(h, w)}")
 
     blocked = blocked_bathy.copy()
+    x_stack_local = None
+    channel_names_local: list[str] = []
+    x_stack_path = ann_dir / "x_stack.npy"
+    meta_path = ann_dir / "meta.json"
+    if x_stack_path.exists() and meta_path.exists():
+        try:
+            import json
+
+            x_stack_local = np.load(x_stack_path).astype(np.float32)
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            names = meta.get("channel_names", [])
+            if isinstance(names, list):
+                channel_names_local = [str(v) for v in names]
+        except Exception:
+            x_stack_local = None
+            channel_names_local = []
+    if min_safe_depth_m is not None:
+        if x_stack_local is not None and "bathy" in channel_names_local:
+            bathy_idx = channel_names_local.index("bathy")
+            shallow_mask = x_stack_local[bathy_idx] > (-float(min_safe_depth_m))
+            blocked |= shallow_mask
+    if x_stack_local is not None:
+        if max_ice_conc is not None and "ice_conc" in channel_names_local:
+            ice_idx = channel_names_local.index("ice_conc")
+            ice_raw = x_stack_local[ice_idx]
+            ice_norm = ice_raw / 100.0 if float(np.nanmax(np.abs(ice_raw))) > 2.0 else ice_raw
+            blocked |= ice_norm > float(max_ice_conc)
+        if max_ice_thickness_m is not None and "ice_thick" in channel_names_local:
+            thick_idx = channel_names_local.index("ice_thick")
+            blocked |= x_stack_local[thick_idx] > float(max_ice_thickness_m)
     if "unet_blocked" in blocked_sources:
         blocked |= unet_pred == 2
     if "unet_caution" in blocked_sources or caution_mode == "strict":
@@ -2965,6 +3119,12 @@ def plan_grid_route(
         risk_mode=risk_mode,
         risk_weight_scale=risk_weight_scale,
     )
+    if x_stack_local is not None and "ice_conc" in channel_names_local:
+        ice_idx = channel_names_local.index("ice_conc")
+        ice_raw = x_stack_local[ice_idx]
+        ice_norm = ice_raw / 100.0 if float(np.nanmax(np.abs(ice_raw))) > 2.0 else ice_raw
+        extra_ice_penalty = np.clip(np.nan_to_num(ice_norm, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0).astype(np.float32)
+        risk_penalty = risk_penalty + extra_ice_penalty * max(0.0, float(ice_risk_multiplier) - 1.0) * 0.35
     if diversity_penalty is not None:
         if diversity_penalty.shape != (h, w):
             raise PlanningError(
@@ -2997,7 +3157,11 @@ def plan_grid_route(
     g_rc_adj = _nearest_unblocked(g_rc, blocked, free_cells)
 
     km_per_row, km_per_col_min = _grid_resolution_km(bounds, h, w)
-    caution_penalty, corridor_reward, near_blocked_penalty = _policy_scalars(caution_mode, corridor_bias)
+    caution_penalty, corridor_reward, near_blocked_penalty = _policy_scalars(
+        caution_mode,
+        corridor_bias,
+        ais_corridor_enabled,
+    )
     near_blocked = _build_near_blocked_mask(blocked)
 
     sr, sc = s_rc_adj

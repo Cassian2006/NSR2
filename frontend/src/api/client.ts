@@ -73,6 +73,22 @@ export type GridGeoDiagnostics = {
   warnings: string[];
 };
 
+export type CustomVesselPolicy = {
+  name: string;
+  polar_category: string;
+  ice_class: string;
+  draft_m: number;
+  min_safe_depth_m: number;
+  risk_mode: string;
+  risk_weight_scale: number;
+  risk_budget: number;
+  confidence_level: number;
+  corridor_bias_multiplier: number;
+  ice_risk_multiplier: number;
+  max_ice_conc: number;
+  max_ice_thickness_m: number;
+};
+
 export type RoutePlanRequest = {
   timestamp: string;
   progress_id?: string;
@@ -82,6 +98,7 @@ export type RoutePlanRequest = {
     objective: string;
     blocked_sources: string[];
     caution_mode: string;
+    ais_corridor_enabled?: boolean;
     corridor_bias: number;
     smoothing: boolean;
     planner?: string;
@@ -100,6 +117,7 @@ export type RoutePlanRequest = {
     dynamic_risk_hard_mode?: "conservative" | "balanced" | "aggressive" | string;
     dynamic_risk_switch_min_interval?: number;
     vessel_profile_id?: string;
+    custom_vessel?: CustomVesselPolicy;
   };
 };
 
@@ -113,6 +131,7 @@ export type DynamicRoutePlanRequest = {
     objective: string;
     blocked_sources: string[];
     caution_mode: string;
+    ais_corridor_enabled?: boolean;
     corridor_bias: number;
     smoothing: boolean;
     planner?: string;
@@ -138,6 +157,7 @@ export type DynamicRoutePlanRequest = {
     dynamic_risk_hard_mode?: "conservative" | "balanced" | "aggressive" | string;
     dynamic_risk_switch_min_interval?: number;
     vessel_profile_id?: string;
+    custom_vessel?: CustomVesselPolicy;
   };
 };
 
@@ -146,6 +166,7 @@ export type VesselProfile = {
   name: string;
   category: string;
   description: string;
+  polar_category: string;
   ice_class: string;
   draft_m: number;
   min_safe_depth_m: number;
@@ -155,6 +176,9 @@ export type VesselProfile = {
     risk_budget: number;
     confidence_level: number;
     corridor_bias_multiplier: number;
+    ice_risk_multiplier: number;
+    max_ice_conc: number;
+    max_ice_thickness_m: number;
   };
 };
 
@@ -460,6 +484,7 @@ export async function planLatestRoute(payload: {
     objective: string;
     blocked_sources: string[];
     caution_mode: string;
+    ais_corridor_enabled?: boolean;
     corridor_bias: number;
     smoothing: boolean;
     planner?: string;
@@ -478,6 +503,7 @@ export async function planLatestRoute(payload: {
     dynamic_risk_hard_mode?: "conservative" | "balanced" | "aggressive" | string;
     dynamic_risk_switch_min_interval?: number;
     vessel_profile_id?: string;
+    custom_vessel?: CustomVesselPolicy;
   };
 }) {
   return apiFetch<RoutePlanResponse>("/latest/plan", {
@@ -530,6 +556,18 @@ export async function getCopernicusConfig() {
     datasets: Record<string, string>;
     variables: Record<string, string>;
   }>("/latest/copernicus/config");
+}
+
+export async function getStormglassConfig() {
+  return apiFetch<{
+    configured: boolean;
+    api_key_set: boolean;
+    source_preference: string;
+    sample_lat_count: number;
+    sample_lon_count: number;
+    request_timeout_sec: number;
+    cache_root: string;
+  }>("/latest/stormglass/config");
 }
 
 export async function getLatestStatus(timestamp: string) {

@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import app.core.latest as latest_mod
 from app.core.config import Settings
 from app.core.latest import LatestDataError, _with_retries, resolve_latest_timestamp
 from app.core.latest_source_health import configure_source_health
@@ -90,6 +91,33 @@ def test_nearest_fallback_uses_passed_settings_local_timestamps(tmp_path: Path) 
     )
     assert resolved.source == "nearest_local_fallback"
     assert resolved.timestamp == "2024-07-10_12"
+
+
+def test_resolve_latest_prefers_stormglass_when_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _build_settings(tmp_path)
+    settings.stormglass_api_key = "demo-key"
+    configure_source_health(
+        store_path=settings.latest_source_health_path,
+        failure_threshold=3,
+        cooldown_sec=60,
+    )
+    _write_pack(settings.annotation_pack_root, "2024-07-01_12")
+
+    def _fake_materialize(**kwargs):
+        return {"materialized_at": "2026-03-25T00:00:00+00:00"}
+
+    monkeypatch.setattr(latest_mod, "_materialize_from_stormglass", _fake_materialize)
+    monkeypatch.setattr(latest_mod, "is_copernicus_configured", lambda settings: False)
+
+    resolved = resolve_latest_timestamp(
+        settings=settings,
+        date="2024-07-01",
+        hour=12,
+        force_refresh=True,
+    )
+
+    assert resolved.timestamp == "2024-07-01_12"
+    assert resolved.source == "stormglass_live"
 
 
 def test_with_retries_stops_on_non_retryable_error() -> None:
